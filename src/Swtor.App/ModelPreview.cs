@@ -30,6 +30,9 @@ public sealed class ModelPreview : IDisposable
     public bool ShowGrid { get; set; } = true;
     public bool HasModel => _meshes.Count > 0;
 
+    /// <summary>Diffuse texture for all pieces. The caller owns it. Null draws a color per material.</summary>
+    public Texture2D? Texture { get; set; }
+
     public ModelPreview(GraphicsDevice device)
     {
         _device = device;
@@ -143,6 +146,7 @@ public sealed class ModelPreview : IDisposable
             _device.DrawUserPrimitives(PrimitiveType.LineList, _grid, 0, _grid.Length / 2);
         }
 
+        _device.SamplerStates[0] = SamplerState.AnisotropicWrap;
         _device.RasterizerState = Wireframe ? Wireframe_ : CullBackfaces ? RasterizerState.CullCounterClockwise : RasterizerState.CullNone;
         _surface.View = view;
         _surface.Projection = projection;
@@ -152,7 +156,9 @@ public sealed class ModelPreview : IDisposable
             _device.Indices = mesh.Indices;
             foreach (var piece in mesh.Pieces)
             {
-                _surface.DiffuseColor = PieceColors[piece.MaterialIndex % PieceColors.Length].ToVector3();
+                _surface.TextureEnabled = Texture is not null;
+                _surface.Texture = Texture;
+                _surface.DiffuseColor = Texture is not null ? Vector3.One : PieceColors[piece.MaterialIndex % PieceColors.Length].ToVector3();
                 _surface.CurrentTechnique.Passes[0].Apply();
                 _device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, piece.StartTriangle * 3, piece.TriangleCount);
             }

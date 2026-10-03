@@ -4,9 +4,20 @@ using Swtor.Formats.Gr2;
 // Usage:
 //   swtor gr2 info <file>           Print the content of one model file.
 //   swtor gr2 survey [root]         Parse every .gr2 file under root and report failures.
+if (args.Length >= 1 && args[0] == "index")
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var index = Swtor.Assets.AssetIndex.Load(DefaultRoot(), new Progress<int>(n => Console.Write($"\r{n} files seen")), forceRescan: args.Contains("--rescan"));
+    Console.WriteLine($"\n{index.Models.Count} models, {index.Textures.Count} textures in {sw.Elapsed}");
+    return 0;
+}
+
+if (args.Length >= 2 && args[0] == "dds")
+    return DdsCommand(args);
+
 if (args.Length < 2 || args[0] != "gr2")
 {
-    Console.Error.WriteLine("Usage: swtor gr2 info <file> | swtor gr2 survey [root]");
+    Console.Error.WriteLine("Usage: swtor gr2 info <file> | gr2 survey [root] | dds survey | dds decode <file> <out.ppm> | index [--rescan]");
     return 1;
 }
 
@@ -57,4 +68,46 @@ static int Survey(string root)
     foreach (var (flags, n) in layouts.OrderByDescending(l => l.Value)) Console.WriteLine($"  layout {(int)flags}: {n}");
     foreach (var (msg, (n, ex)) in errors.OrderByDescending(e => e.Value.Count)) Console.WriteLine($"  {n} x {msg}  e.g. {ex}");
     return failed == 0 ? 0 : 2;
+}
+
+static string DefaultRoot() => Environment.GetEnvironmentVariable("SWTOR_ASSETS") ?? @"C:\jka_tor_assets\resources";
+
+// dds survey: reads every texture (header, then full decode of every 50th file) and counts formats.
+// dds decode <file> <out.ppm>: writes the image as a PPM file, to view it.
+static int DdsCommand(string[] args)
+{
+    if (args[1] == "decode" && args.Length >= 4)
+    {
+        var image = Swtor.Formats.Dds.DdsReader.Decode(File.ReadAllBytes(args[2]));
+        using var output = File.Create(args[3]);
+        output.Write(System.Text.Encoding.ASCII.GetBytes($"P6\n{image.Width} {image.Height}\n255\n"));
+        for (int i = 0; i < image.Width * image.Height; i++) output.Write(image.Rgba.AsSpan(i * 4, 3));
+        return 0;
+    }
+
+    var index = Swtor.Assets.AssetIndex.Load(DefaultRoot());
+    var formats = new Dictionary<string, int>();
+    var errors = new Dictionary<string, (int Count, string Example)>();
+    int n = 0, decoded = 0;
+    foreach (var texture in index.Textures)
+    {
+        string path = index.FullPath(texture);
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            var info = Swtor.Formats.Dds.DdsReader.ReadInfo(bytes);
+            string key = $"{info.Format}";
+            formats[key] = formats.GetValueOrDefault(key) + 1;
+            if (n++ % 50 == 0) { Swtor.Formats.Dds.DdsReader.Decode(bytes); decoded++; }
+        }
+        catch (GameFormatException e)
+        {
+            string key = e.Message[..e.Message.LastIndexOf(" (offset", StringComparison.Ordinal)];
+            errors[key] = (errors.GetValueOrDefault(key).Count + 1, errors.TryGetValue(key, out var v) ? v.Example : texture);
+        }
+    }
+    Console.WriteLine($"textures {index.Textures.Count}, fully decoded {decoded}");
+    foreach (var (f, c) in formats.OrderByDescending(x => x.Value)) Console.WriteLine($"  {f}: {c}");
+    foreach (var (msg, (c, ex)) in errors.OrderByDescending(x => x.Value.Count)) Console.WriteLine($"  ERROR {c} x {msg}  e.g. {ex}");
+    return errors.Count == 0 ? 0 : 2;
 }

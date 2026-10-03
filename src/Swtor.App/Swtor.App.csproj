@@ -13,4 +13,7 @@
     <Reference Include="Monogame.ImGuiNet"><HintPath>$(PkgMonoGame_ImGuiNet)/Monogame.ImGuiNet.dll</HintPath></Reference>
     <ProjectReference Include="..\Swtor.Formats\Swtor.Formats.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Swtor.Assets\Swtor.Assets.csproj" />
+  </ItemGroup>
 </Project>

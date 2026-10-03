@@ -14,7 +14,7 @@ Solution layout (`src/`):
 4. `Swtor.Tests`: xUnit. Uses small fixture files only.
 5. `Swtor.Cli`: debug commands (`gr2 info <file>`, `gr2 survey [root]`). Use it to check parsers against the full tree.
 
-`Swtor.App` is the MonoGame DesktopGL viewer with Dear ImGui panels (`ViewerGame.cs`). `Swtor.Assets` is still planned.
+`Swtor.App` is the MonoGame DesktopGL viewer with Dear ImGui panels (`ViewerGame.cs`). `Swtor.Assets` holds `AssetIndex`: a cached scan of models and textures (about 5 s for 800k files, cache in `%LOCALAPPDATA%SwtorCharacterMaker`).
 
 Why this split: parsing is slow and format-heavy. It runs once, behind the cache. The render loop only touches ready GPU buffers.
 
@@ -61,3 +61,11 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - The `MonoGame.ImGuiNet` NuGet package ships its DLL at the package root, not in `lib/`. The csproj references it with a `HintPath`. Its namespace is `MonoGame.ImGuiNet`. It pulls an older ImGui.NET (no `ImGuiChildFlags`, `IniFilename` is read-only).
 - `System.Numerics` and `Microsoft.Xna.Framework` both define `Vector2/3/4`. In UI files, alias the one you need.
 - Run the viewer with a model: `dotnet run --project src/Swtor.App -- <file.gr2>`.
+
+## Models and textures
+
+- The explorer lists only models (`.gr2`, not `.lod.gr2`). Do not add other file types to it.
+- NPC and creature models find textures by name: `name.gr2` -> `name_v01_d.dds` (`_d` diffuse, `_n` normal, `_s`/`_h` other maps). `AssetIndex.FindTextures` does this.
+- Player parts (head, chest, hair, ...) have no same-name texture. They come from GOM appearance data, which is not read yet.
+- DDS: BC1/BC2/BC3 and uncompressed BGRA/BGRX cover 224,737 of 224,780 files. The rest are DX10 minimaps and broken files. No BC5/BC7 is used.
+- UV V is not flipped. Textures look correct as is.
