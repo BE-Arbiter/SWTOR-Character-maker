@@ -53,6 +53,7 @@ public sealed partial class CharacterPanel
             var spec = catalog.Specs.FirstOrDefault(s => s.Class == "trooper" && s.Gender == "male" && s.Race == "human" && !s.IsLegacy) ?? catalog.Specs[0];
             SelectSpec(spec.Class, spec.Gender, spec.Race, spec.IsLegacy);
         }
+        ApplyPendingSave();
     }
 
     /// <summary>Shows this character in the preview. Call when the tab becomes active.</summary>

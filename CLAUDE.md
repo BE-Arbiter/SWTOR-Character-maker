@@ -105,3 +105,10 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Equipment comes from the same slot indexes. One asset gives a base model plus attachments (shoulders, back piece). They share one material and one texture. A material variant can have color schemes: the scheme gives two palettes for the slot (`PaletteTint`).
 - `--equip slot=art_name` (repeatable) equips assets at start, for testing: `--character --equip chest=chest_armor01_heavy_bh_a02`.
 - Not done: waist and bracer have no bare part; no skeleton, animation or pose; no real skin shading; no eye color on the eye mesh.
+
+## Saving characters
+
+- `CharacterSave` is JSON (version 1). Choices are stored as game ids (asset id + material id per slot, equipment asset id + material id + color scheme guid), not as list positions. Race, class and gender select the spec.
+- Default folder: `Documents\SWTOR Character Maker\Characters`. Menu File > Save character / Load character. `--load file.json` loads a file at start.
+- Loading skips choices that no longer exist and keeps the defaults for them. Loading before the game database is ready is queued (`CharacterPanel.Apply`).
+- Not tested by an automatic test: the ImGui dialogs. The JSON, the load path and `ToSave` were checked by hand.

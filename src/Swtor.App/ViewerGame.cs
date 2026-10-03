@@ -15,7 +15,7 @@ using Vector4 = System.Numerics.Vector4;
 namespace Swtor.App;
 
 /// <summary>Main window. Layout: menu bar on top, then explorer 25%, 3D preview 40%, details 35%.</summary>
-public sealed class ViewerGame : Game
+public sealed partial class ViewerGame : Game
 {
     private const float LeftShare = 0.25f, CenterShare = 0.40f;
     private const ImGuiWindowFlags PanelFlags = ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize
@@ -69,7 +69,8 @@ public sealed class ViewerGame : Game
     private bool _popupOpen = true;
     private string _folderInput = "";
 
-    public ViewerGame(string? initialModel = null, string? initialScheme = null, bool startOnCharacter = false, IEnumerable<(string Slot, string ArtName)>? equipment = null)
+    public ViewerGame(string? initialModel = null, string? initialScheme = null, bool startOnCharacter = false,
+        IEnumerable<(string Slot, string ArtName)>? equipment = null, string? loadPath = null)
     {
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -89,10 +90,22 @@ public sealed class ViewerGame : Game
         _initialScheme = initialScheme;
         _showCharacterTab = startOnCharacter;
         _startupEquipment = equipment?.ToList();
+        _startupLoadPath = loadPath;
+        if (loadPath is not null) _showCharacterTab = true;
     }
 
     private string? _initialModel, _initialScheme;
     private List<(string Slot, string ArtName)>? _startupEquipment;
+    private readonly string? _startupLoadPath;
+
+    // Save and load dialogs.
+    private enum FileDialog { None, Save, Load }
+    private FileDialog _fileDialogRequest;
+    private bool _fileDialogOpen = true;
+    private string _characterPath = "";
+    private string? _dialogMessage;
+    private static readonly string CharacterFolder = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "SWTOR Character Maker", "Characters");
 
     protected override void Initialize()
     {
@@ -102,6 +115,7 @@ public sealed class ViewerGame : Game
         _preview = new ModelPreview(GraphicsDevice);
         _character = new CharacterPanel(GraphicsDevice, _preview);
         if (_startupEquipment is not null) _character.SetStartupEquipment(_startupEquipment);
+        if (_startupLoadPath is not null) LoadCharacter(_startupLoadPath);
 
         _folderInput = Environment.GetEnvironmentVariable("SWTOR_ASSETS") ?? @"C:\jka_tor_assets\resources";
         StartIndexing(_folderInput, rescan: false);
@@ -174,6 +188,7 @@ public sealed class ViewerGame : Game
         // The 3D view goes first. ImGui draws on top of it in AfterLayout.
         _preview.Draw(_previewArea);
         DrawOpenFolderDialog();
+        DrawCharacterFileDialogs();
         _gui.AfterLayout();
         base.Draw(gameTime);
     }
@@ -242,6 +257,10 @@ public sealed class ViewerGame : Game
         if (ImGui.BeginMenu("File"))
         {
             if (ImGui.MenuItem("Open asset folder...")) _openFolderRequested = true;
+            ImGui.Separator();
+            if (ImGui.MenuItem("Save character...", null, false, _character.ToSave() is not null)) _fileDialogRequest = FileDialog.Save;
+            if (ImGui.MenuItem("Load character...")) _fileDialogRequest = FileDialog.Load;
+            ImGui.Separator();
             if (ImGui.MenuItem("Rebuild index", null, false, !_scanning && _root.Length > 0)) StartIndexing(_root, rescan: true);
             ImGui.Separator();
             if (ImGui.MenuItem("Quit")) Exit();
