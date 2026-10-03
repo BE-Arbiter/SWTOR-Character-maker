@@ -17,6 +17,7 @@ public sealed class AppearanceCatalog
     private readonly string _root;
     private readonly Dictionary<string, List<AppearanceMatch>> _byModel = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (AppearanceAsset Asset, string Slot)> _byId = new();
+    private readonly Dictionary<string, List<AppearanceAsset>> _bySlot = new(StringComparer.OrdinalIgnoreCase);
 
     public int AssetCount { get; private set; }
 
@@ -46,6 +47,13 @@ public sealed class AppearanceCatalog
     public (AppearanceAsset Asset, string Slot)? FindAsset(long id) =>
         _byId.TryGetValue(id.ToString(System.Globalization.CultureInfo.InvariantCulture), out var found) ? found : null;
 
+    /// <summary>Finds the first asset of a slot by its art name, for example ("chest", "chest_naked_caucasian_young_a01").</summary>
+    public AppearanceAsset? FindAsset(string slot, string artName) =>
+        _bySlot.TryGetValue(slot, out var list) ? list.FirstOrDefault(a => a.ArtName == artName) : null;
+
+    /// <summary>All assets of a slot (the folder name under art/dynamic).</summary>
+    public IReadOnlyList<AppearanceAsset> AssetsOfSlot(string slot) => _bySlot.TryGetValue(slot, out var list) ? list : [];
+
     /// <summary>Assets that use <paramref name="modelPath"/> (relative to the root). Empty if none.</summary>
     public IReadOnlyList<AppearanceMatch> Find(string modelPath) =>
         _byModel.TryGetValue(Normalize(modelPath), out var list) ? list : [];
@@ -66,6 +74,8 @@ public sealed class AppearanceCatalog
     {
         AssetCount++;
         _byId[asset.Id] = (asset, slot);
+        if (!_bySlot.TryGetValue(slot, out var inSlot)) _bySlot[slot] = inSlot = [];
+        inSlot.Add(asset);
         Register(asset.BaseFile, asset, slot, isAttachment: false);
         foreach (var attachment in asset.Attachments) Register(attachment, asset, slot, isAttachment: true);
     }

@@ -6,6 +6,7 @@ using Swtor.Assets;
 using Swtor.Formats;
 using Swtor.Formats.Dds;
 using Swtor.Formats.Gr2;
+using Swtor.Formats.Xml;
 
 namespace Swtor.App;
 
@@ -13,7 +14,7 @@ namespace Swtor.App;
 /// The "Character" tab: choose class, gender and race, then the appearance options that the game offers
 /// for that combination. The preview shows the head, hair and face hair.
 /// </summary>
-public sealed class CharacterPanel
+public sealed partial class CharacterPanel
 {
     // Slots shown as lists, then slots shown as color swatches.
     private static readonly AppearanceSlot[] ListSlots =
@@ -64,20 +65,17 @@ public sealed class CharacterPanel
         _textures.Clear();
 
         char gender = _spec.Gender == "female" ? 'f' : 'm';
+        ResolvedPart? headPart = null;
         foreach (var slot in ModelSlots)
         {
             if (OptionFor(slot) is not { } option) continue;
-            if (PartResolver.Resolve(_index, option, gender) is not { } part) continue;
-            try
-            {
-                var model = Gr2Reader.Parse(File.ReadAllBytes(_index.FullPath(part.ModelPath)));
-                _preview.Add(model, LoadTexture(part, TintFor(slot)));
-            }
-            catch (Exception e) when (e is GameFormatException or IOException)
-            {
-                _error = $"{slot}: {e.Message}";
-            }
+            if (PartResolver.Resolve(_index, option, gender, headPart?.Bodytype) is not { } part) continue;
+            if (slot == AppearanceSlot.Head) headPart = part;
+            AddModel(part.ModelPath, LoadTexture(part, TintFor(slot)), slot.ToString());
         }
+
+        string? headName = OptionFor(AppearanceSlot.Head) is { } head ? _index.Appearances.FindAsset(head.AssetId)?.Asset.ArtName : null;
+        AddBodyAndEquipment(gender, headPart?.Bodytype, headName);
         _preview.Frame();
     }
 
@@ -96,6 +94,8 @@ public sealed class CharacterPanel
         foreach (var slot in ListSlots) DrawListSlot(slot);
         ImGui.Separator();
         foreach (var slot in ColorSlots) DrawColorSlot(slot);
+        ImGui.Separator();
+        DrawEquipment();
     }
 
     private void DrawSpecChoice()
@@ -271,13 +271,15 @@ public sealed class CharacterPanel
         return color is null ? null : ParseColor(color);
     }
 
-    private Texture2D? LoadTexture(ResolvedPart part, Vector4? tint)
+    private Texture2D? LoadTexture(ResolvedPart part, Vector4? tint, Palette? primary = null, Palette? secondary = null)
     {
         if (part.DiffusePath is null || _index is null) return null;
         try
         {
             var image = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(part.DiffusePath)));
             if (tint is { } t) Multiply(image, t);
+            if ((primary is not null || secondary is not null) && part.MaskPath is not null)
+                image = PaletteTint.Apply(image, DdsReader.Decode(File.ReadAllBytes(_index.FullPath(part.MaskPath))), primary, secondary);
             var texture = TextureLoader.Create(_device, image);
             _textures.Add(texture);
             return texture;

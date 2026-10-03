@@ -97,3 +97,11 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - `PartResolver` turns an option into files. In file names, `[bt]` is the body type and `[gen]` is `f` or `m`. Material file names can contain `[bt]` too.
 - The viewer opens `GomDatabase` on a background thread after the index (about 800 MB of memory for the whole process). The Character tab shows "Loading the game database..." until it is ready.
 - Not done yet: body, armor and hands in the creator; real skin/hair shading; eye color on the eye mesh; `--character` starts the viewer on the Character tab.
+
+## Body and equipment
+
+- All parts (head, hair, body, armor) are in one shared model space. The scale is about 1/10 of a meter per unit (a head is at y of about 0.19). Meshes are in bind pose, so parts can be placed side by side without a skeleton.
+- The bare body is the asset `<slot>_naked_<variant>_young_a01` for chest, hand, leg and boot (`NakedBody`). The body type (`bma`, `bfa`, ...) is the one of the head, so all parts match.
+- Equipment comes from the same slot indexes. One asset gives a base model plus attachments (shoulders, back piece). They share one material and one texture. A material variant can have color schemes: the scheme gives two palettes for the slot (`PaletteTint`).
+- `--equip slot=art_name` (repeatable) equips assets at start, for testing: `--character --equip chest=chest_armor01_heavy_bh_a02`.
+- Not done: waist and bracer have no bare part; no skeleton, animation or pose; no real skin shading; no eye color on the eye mesh.

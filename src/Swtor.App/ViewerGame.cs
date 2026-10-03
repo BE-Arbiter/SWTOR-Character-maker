@@ -69,7 +69,7 @@ public sealed class ViewerGame : Game
     private bool _popupOpen = true;
     private string _folderInput = "";
 
-    public ViewerGame(string? initialModel = null, string? initialScheme = null, bool startOnCharacter = false)
+    public ViewerGame(string? initialModel = null, string? initialScheme = null, bool startOnCharacter = false, IEnumerable<(string Slot, string ArtName)>? equipment = null)
     {
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -88,9 +88,11 @@ public sealed class ViewerGame : Game
         _initialModel = initialModel;
         _initialScheme = initialScheme;
         _showCharacterTab = startOnCharacter;
+        _startupEquipment = equipment?.ToList();
     }
 
     private string? _initialModel, _initialScheme;
+    private List<(string Slot, string ArtName)>? _startupEquipment;
 
     protected override void Initialize()
     {
@@ -99,6 +101,7 @@ public sealed class ViewerGame : Game
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
         _preview = new ModelPreview(GraphicsDevice);
         _character = new CharacterPanel(GraphicsDevice, _preview);
+        if (_startupEquipment is not null) _character.SetStartupEquipment(_startupEquipment);
 
         _folderInput = Environment.GetEnvironmentVariable("SWTOR_ASSETS") ?? @"C:\jka_tor_assets\resources";
         StartIndexing(_folderInput, rescan: false);
