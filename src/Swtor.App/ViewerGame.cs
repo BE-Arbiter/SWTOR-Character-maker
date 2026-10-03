@@ -55,11 +55,21 @@ public sealed class ViewerGame : Game
     private string _textureQuery = "";
     private List<string> _textureResults = [];
 
+    // Character creator and the game database. The database opens on a background thread.
+    private enum ActiveTab { None, Model, Character }
+    private CharacterPanel _character = null!;
+    private ActiveTab _activeTab = ActiveTab.Model;
+    private bool _showModelTab, _showCharacterTab;
+    private GomDatabase? _gom;
+    private volatile CharacterCatalog? _readyCatalog;
+    private volatile GomDatabase? _readyGom;
+    private volatile string? _gomError;
+
     private bool _openFolderRequested;
     private bool _popupOpen = true;
     private string _folderInput = "";
 
-    public ViewerGame(string? initialModel = null, string? initialScheme = null)
+    public ViewerGame(string? initialModel = null, string? initialScheme = null, bool startOnCharacter = false)
     {
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -70,9 +80,14 @@ public sealed class ViewerGame : Game
         IsMouseVisible = true;
         Window.AllowUserResizing = true;
         Window.Title = "SWTOR Character Maker";
-        _explorer.FileSelected += path => _pendingModel = path;
+        _explorer.FileSelected += path =>
+        {
+            _pendingModel = path;
+            _showModelTab = true;
+        };
         _initialModel = initialModel;
         _initialScheme = initialScheme;
+        _showCharacterTab = startOnCharacter;
     }
 
     private string? _initialModel, _initialScheme;
@@ -83,6 +98,7 @@ public sealed class ViewerGame : Game
         _gui.RebuildFontAtlas();
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
         _preview = new ModelPreview(GraphicsDevice);
+        _character = new CharacterPanel(GraphicsDevice, _preview);
 
         _folderInput = Environment.GetEnvironmentVariable("SWTOR_ASSETS") ?? @"C:\jka_tor_assets\resources";
         StartIndexing(_folderInput, rescan: false);
@@ -103,11 +119,19 @@ public sealed class ViewerGame : Game
             _index = ready;
             _scanning = false;
             _explorer.SetIndex(ready);
+            StartGomLoading(ready.Root);
             if (_initialModel is not null)
             {
                 _pendingModel = Path.GetRelativePath(_root, _initialModel).Replace('\\', '/');
                 _initialModel = null;
             }
+        }
+        if (_readyCatalog is { } catalog)
+        {
+            _readyCatalog = null;
+            _gom = _readyGom;
+            _character.SetData(_index, catalog);
+            if (_activeTab == ActiveTab.Character) _character.Rebuild();
         }
         if (_scanning) _explorer.Status = _indexError ?? $"Indexing the asset folder... {_scanned} files seen.\nThis happens once. The result is cached.";
 
@@ -182,6 +206,25 @@ public sealed class ViewerGame : Game
         });
     }
 
+    // Opens the game database and reads the character specs. Takes a few seconds, so it runs in the background.
+    private void StartGomLoading(string root)
+    {
+        _gomError = null;
+        Task.Run(() =>
+        {
+            try
+            {
+                var db = GomDatabase.Open(root);
+                _readyGom = db;
+                _readyCatalog = CharacterCatalog.Load(db);
+            }
+            catch (Exception e) when (e is IOException or GameFormatException or UnauthorizedAccessException)
+            {
+                _gomError = e.Message;
+            }
+        });
+    }
+
     private static void DrawPanel(string title, float x, float y, float w, float h, Action content)
     {
         ImGui.SetNextWindowPos(new Vector2(x, y));
@@ -249,17 +292,35 @@ public sealed class ViewerGame : Game
     {
         if (ImGui.BeginTabBar("##details"))
         {
-            if (ImGui.BeginTabItem("Model"))
+            // The preview shows what the active tab describes. It is rebuilt when the tab changes.
+            var active = ActiveTab.None;
+            var modelFlags = _showModelTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            _showModelTab = false;
+            bool modelOpen = true;
+            if (ImGui.BeginTabItem("Model", ref modelOpen, modelFlags))
             {
+                active = ActiveTab.Model;
                 DrawModelInfo();
                 ImGui.EndTabItem();
             }
-            if (ImGui.BeginTabItem("Character"))
+            var characterFlags = _showCharacterTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            _showCharacterTab = false;
+            bool characterOpen = true;
+            if (ImGui.BeginTabItem("Character", ref characterOpen, characterFlags))
             {
-                ImGui.TextDisabled("Reserved: race, body, head, armor, colors.");
+                active = ActiveTab.Character;
+                _character.Draw();
                 ImGui.EndTabItem();
             }
             ImGui.EndTabBar();
+
+            if (active != ActiveTab.None && active != _activeTab)
+            {
+                _activeTab = active;
+                if (active == ActiveTab.Character) _character.Rebuild();
+                else if (_model is not null) _preview.Load(_model);
+                if (active == ActiveTab.Model && _baseImage is not null) RebuildTexture();
+            }
         }
     }
 
@@ -396,7 +457,7 @@ public sealed class ViewerGame : Game
     private string? VariantTexture(AppearanceMatch match, int variant)
     {
         if (_index is null) return null;
-        var material = _index.Appearances.ReadMaterial(match.Asset.Materials[variant], match.Gender);
+        var material = _index.Appearances.ReadMaterial(match.Asset.Materials[variant], match.Gender, match.Bodytype);
         string? diffuse = material?.DiffuseMap;
         if (diffuse is null) return null;
         string path = diffuse + ".dds";
@@ -473,7 +534,7 @@ public sealed class ViewerGame : Game
     private string? VariantMask(AppearanceMatch match, int variant)
     {
         if (_index is null) return null;
-        var material = _index.Appearances.ReadMaterial(match.Asset.Materials[variant], match.Gender);
+        var material = _index.Appearances.ReadMaterial(match.Asset.Materials[variant], match.Gender, match.Bodytype);
         string? mask = material?.TexturePath("PaletteMaskMap");
         if (mask is null || mask.StartsWith("art/defaultassets", StringComparison.OrdinalIgnoreCase)) return null;
         string path = mask + ".dds";

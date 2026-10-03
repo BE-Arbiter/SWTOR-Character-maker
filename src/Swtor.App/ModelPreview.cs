@@ -8,7 +8,13 @@ namespace Swtor.App;
 /// <summary>Draws one GR2 model in bind pose with an orbit camera.</summary>
 public sealed class ModelPreview : IDisposable
 {
-    private sealed record GpuMesh(VertexBuffer Vertices, IndexBuffer Indices, Gr2Piece[] Pieces);
+    private sealed class GpuMesh(VertexBuffer vertices, IndexBuffer indices, Gr2Piece[] pieces)
+    {
+        public VertexBuffer Vertices { get; } = vertices;
+        public IndexBuffer Indices { get; } = indices;
+        public Gr2Piece[] Pieces { get; } = pieces;
+        public Texture2D? Texture { get; set; }
+    }
 
     private static readonly Color[] PieceColors =
     [
@@ -22,6 +28,7 @@ public sealed class ModelPreview : IDisposable
     private readonly List<GpuMesh> _meshes = [];
     private VertexPositionColor[] _grid = [];
 
+    private Vector3 _boundsMin = new(float.MaxValue), _boundsMax = new(float.MinValue);
     private Vector3 _target;
     private float _yaw = 0.6f, _pitch = 0.3f, _distance = 1f, _radius = 1f;
 
@@ -30,8 +37,15 @@ public sealed class ModelPreview : IDisposable
     public bool ShowGrid { get; set; } = true;
     public bool HasModel => _meshes.Count > 0;
 
-    /// <summary>Diffuse texture for all pieces. The caller owns it. Null draws a color per material.</summary>
-    public Texture2D? Texture { get; set; }
+    /// <summary>Diffuse texture for all meshes. The caller owns it. Null draws a color per material.</summary>
+    public Texture2D? Texture
+    {
+        get => _meshes.Count > 0 ? _meshes[0].Texture : null;
+        set
+        {
+            foreach (var mesh in _meshes) mesh.Texture = value;
+        }
+    }
 
     public ModelPreview(GraphicsDevice device)
     {
@@ -41,12 +55,22 @@ public sealed class ModelPreview : IDisposable
         _lines = new BasicEffect(device) { VertexColorEnabled = true, LightingEnabled = false };
     }
 
-    /// <summary>Replaces the current model. Must be called on the game thread (creates GPU buffers).</summary>
+    /// <summary>Replaces the current content with one model. Must be called on the game thread (creates GPU buffers).</summary>
     public void Load(Gr2Model model)
     {
         Clear();
-        var min = new Vector3(float.MaxValue);
-        var max = new Vector3(float.MinValue);
+        Add(model, null);
+        Frame();
+    }
+
+    /// <summary>
+    /// Adds a model to the scene with its own texture (the caller owns the texture).
+    /// Call <see cref="Frame"/> after the last model so the camera fits the scene.
+    /// </summary>
+    public void Add(Gr2Model model, Texture2D? texture)
+    {
+        var min = _boundsMin;
+        var max = _boundsMax;
 
         foreach (var mesh in model.Meshes)
         {
@@ -67,17 +91,23 @@ public sealed class ModelPreview : IDisposable
             vb.SetData(vertices);
             var ib = new IndexBuffer(_device, IndexElementSize.SixteenBits, mesh.Indices.Length, BufferUsage.WriteOnly);
             ib.SetData(mesh.Indices);
-            _meshes.Add(new GpuMesh(vb, ib, mesh.Pieces.ToArray()));
+            _meshes.Add(new GpuMesh(vb, ib, mesh.Pieces.ToArray()) { Texture = texture });
         }
-
-        if (_meshes.Count == 0) return;
-        _target = (min + max) / 2f;
-        _radius = Math.Max(Vector3.Distance(min, max) / 2f, 0.01f);
-        _distance = _radius * 2.6f;
-        BuildGrid(min.Y);
+        _boundsMin = min;
+        _boundsMax = max;
     }
 
-    /// <summary>Frees the GPU buffers of the current model.</summary>
+    /// <summary>Points the camera at the whole scene and moves the grid to its floor.</summary>
+    public void Frame()
+    {
+        if (_meshes.Count == 0) return;
+        _target = (_boundsMin + _boundsMax) / 2f;
+        _radius = Math.Max(Vector3.Distance(_boundsMin, _boundsMax) / 2f, 0.01f);
+        _distance = _radius * 2.6f;
+        BuildGrid(_boundsMin.Y);
+    }
+
+    /// <summary>Frees the GPU buffers of the current scene. Textures are not freed: the caller owns them.</summary>
     public void Clear()
     {
         foreach (var m in _meshes)
@@ -86,6 +116,8 @@ public sealed class ModelPreview : IDisposable
             m.Indices.Dispose();
         }
         _meshes.Clear();
+        _boundsMin = new Vector3(float.MaxValue);
+        _boundsMax = new Vector3(float.MinValue);
     }
 
     public void Dispose()
@@ -156,9 +188,9 @@ public sealed class ModelPreview : IDisposable
             _device.Indices = mesh.Indices;
             foreach (var piece in mesh.Pieces)
             {
-                _surface.TextureEnabled = Texture is not null;
-                _surface.Texture = Texture;
-                _surface.DiffuseColor = Texture is not null ? Vector3.One : PieceColors[piece.MaterialIndex % PieceColors.Length].ToVector3();
+                _surface.TextureEnabled = mesh.Texture is not null;
+                _surface.Texture = mesh.Texture;
+                _surface.DiffuseColor = mesh.Texture is not null ? Vector3.One : PieceColors[piece.MaterialIndex % PieceColors.Length].ToVector3();
                 _surface.CurrentTechnique.Passes[0].Apply();
                 _device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, piece.StartTriangle * 3, piece.TriangleCount);
             }

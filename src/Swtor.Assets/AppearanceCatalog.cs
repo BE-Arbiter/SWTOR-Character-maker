@@ -6,7 +6,7 @@ namespace Swtor.Assets;
 /// <summary>An asset that uses a model, with the body type the model file matched.</summary>
 /// <param name="Slot">Folder name under art/dynamic, for example "chest" or "head".</param>
 /// <param name="Gender">'f' or 'm' from the body type (for example "bfa" gives 'f'). Null if the model has no body type.</param>
-public sealed record AppearanceMatch(AppearanceAsset Asset, string Slot, char? Gender, bool IsAttachment);
+public sealed record AppearanceMatch(AppearanceAsset Asset, string Slot, char? Gender, bool IsAttachment, string? Bodytype = null);
 
 /// <summary>
 /// Links model files to the assets and material variants from the slot index.xml files.
@@ -16,6 +16,7 @@ public sealed class AppearanceCatalog
 {
     private readonly string _root;
     private readonly Dictionary<string, List<AppearanceMatch>> _byModel = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (AppearanceAsset Asset, string Slot)> _byId = new();
 
     public int AssetCount { get; private set; }
 
@@ -41,17 +42,22 @@ public sealed class AppearanceCatalog
         Slots = slots;
     }
 
+    /// <summary>Finds an asset by its numeric id (as written in index.xml). Returns null if unknown.</summary>
+    public (AppearanceAsset Asset, string Slot)? FindAsset(long id) =>
+        _byId.TryGetValue(id.ToString(System.Globalization.CultureInfo.InvariantCulture), out var found) ? found : null;
+
     /// <summary>Assets that use <paramref name="modelPath"/> (relative to the root). Empty if none.</summary>
     public IReadOnlyList<AppearanceMatch> Find(string modelPath) =>
         _byModel.TryGetValue(Normalize(modelPath), out var list) ? list : [];
 
     /// <summary>
     /// Reads the material file of an asset variant. Returns null when the file does not exist.
-    /// "[gen]" in the file name is replaced by the gender letter ('m' when unknown).
+    /// "[gen]" in the file name is replaced by the gender letter ('m' when unknown). "[bt]" is replaced by the body type.
     /// </summary>
-    public MaterialDef? ReadMaterial(AssetMaterial material, char? gender)
+    public MaterialDef? ReadMaterial(AssetMaterial material, char? gender, string? bodytype = null)
     {
-        string name = material.FileName.Replace("[gen]", (gender ?? 'm').ToString(), StringComparison.OrdinalIgnoreCase);
+        string name = material.FileName.Replace("[gen]", (gender ?? 'm').ToString(), StringComparison.OrdinalIgnoreCase)
+            .Replace("[bt]", bodytype ?? "", StringComparison.OrdinalIgnoreCase);
         string path = Path.Combine(_root, Normalize(name).Replace('/', Path.DirectorySeparatorChar));
         return File.Exists(path) ? MaterialReader.Parse(File.ReadAllText(path)) : null;
     }
@@ -59,6 +65,7 @@ public sealed class AppearanceCatalog
     private void Add(AppearanceAsset asset, string slot)
     {
         AssetCount++;
+        _byId[asset.Id] = (asset, slot);
         Register(asset.BaseFile, asset, slot, isAttachment: false);
         foreach (var attachment in asset.Attachments) Register(attachment, asset, slot, isAttachment: true);
     }
@@ -75,7 +82,7 @@ public sealed class AppearanceCatalog
         foreach (var bodytype in asset.Bodytypes)
         {
             char? gender = bodytype.Length >= 2 ? char.ToLowerInvariant(bodytype[1]) : null;
-            AddMatch(file.Replace("[bt]", bodytype, StringComparison.OrdinalIgnoreCase), new AppearanceMatch(asset, slot, gender, isAttachment));
+            AddMatch(file.Replace("[bt]", bodytype, StringComparison.OrdinalIgnoreCase), new AppearanceMatch(asset, slot, gender, isAttachment, bodytype));
         }
     }
 

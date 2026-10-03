@@ -15,6 +15,9 @@ if (args.Length >= 1 && args[0] == "index")
 if (args.Length >= 2 && args[0] == "appearance")
     return AppearanceCommand(args);
 
+if (args.Length >= 2 && args[0] == "char")
+    return CharCommand(args);
+
 if (args.Length >= 2 && args[0] == "gom")
     return GomCommand(args);
 
@@ -200,6 +203,14 @@ static int GomCommand(string[] args)
         return failed == 0 ? 0 : 2;
     }
 
+    if (args[1] == "enum" && args.Length >= 3)
+    {
+        var s2 = Swtor.Formats.Gom.GomSchema.Parse(File.ReadAllBytes(Path.Combine(gomRoot, "client.gom")));
+        foreach (var e in s2.Enums.Values.Where(e => e.Names.Any(n => n.Contains(args[2], StringComparison.OrdinalIgnoreCase))))
+            Console.WriteLine($"0x{e.Id:X}: {string.Join(", ", e.Names.Select((n, i) => $"{i}={n}"))}");
+        return 0;
+    }
+
     if (args[1] == "schema")
     {
         var s = Swtor.Formats.Gom.GomSchema.Parse(File.ReadAllBytes(Path.Combine(gomRoot, "client.gom")));
@@ -230,34 +241,36 @@ static int GomCommand(string[] args)
 // Prints an object. When the schema is known, enum values show their names.
 static void PrintObject(Swtor.Formats.Gom.GomObject obj, int indent, Swtor.Formats.Gom.GomSchema? schema = null)
 {
-    string pad = new(' ', indent * 2);
     foreach (var f in obj.Fields)
     {
         var declared = schema is not null && schema.Fields.TryGetValue(f.Id, out var def) ? def.Type : null;
-        switch (f.Value)
-        {
-            case Swtor.Formats.Gom.GomObject inner:
-                Console.WriteLine($"{pad}0x{f.Id:X} ({f.Type}):");
-                PrintObject(inner, indent + 1, schema);
-                break;
-            case Swtor.Formats.Gom.GomList list:
-                Console.WriteLine($"{pad}0x{f.Id:X} ({f.Type}) list<{list.ItemType}> [{list.Items.Count}]");
-                foreach (var item in list.Items.Take(12))
-                {
-                    if (item is Swtor.Formats.Gom.GomObject io) { Console.WriteLine($"{pad}  -"); PrintObject(io, indent + 2, schema); }
-                    else Console.WriteLine($"{pad}  - {Format(item, declared?.Item, schema)}");
-                }
-                if (list.Items.Count > 12) Console.WriteLine($"{pad}  ... {list.Items.Count - 12} more");
-                break;
-            case Swtor.Formats.Gom.GomMap map:
-                Console.WriteLine($"{pad}0x{f.Id:X} ({f.Type}) map<{map.KeyType},{map.ValueType}> [{map.Entries.Count}]");
-                foreach (var e in map.Entries.Take(12))
-                    Console.WriteLine($"{pad}  {Format(e.Key, declared?.Item, schema)} => {(e.Value is Swtor.Formats.Gom.GomObject ? "{object}" : e.Value is Swtor.Formats.Gom.GomList l ? $"list[{l.Items.Count}]" : e.Value is Swtor.Formats.Gom.GomMap m ? $"map[{m.Entries.Count}]" : Format(e.Value, declared?.Value, schema))}");
-                break;
-            default:
-                Console.WriteLine($"{pad}0x{f.Id:X} ({f.Type}) = {Format(f.Value, declared, schema)}");
-                break;
-        }
+        PrintValue($"0x{f.Id:X} ({f.Type})", f.Value, declared, indent, schema);
+    }
+}
+
+static void PrintValue(string label, object? value, Swtor.Formats.Gom.GomTypeDescriptor? declared, int indent, Swtor.Formats.Gom.GomSchema? schema)
+{
+    string pad = new(' ', indent * 2);
+    switch (value)
+    {
+        case Swtor.Formats.Gom.GomObject inner:
+            Console.WriteLine($"{pad}{label}:");
+            PrintObject(inner, indent + 1, schema);
+            break;
+        case Swtor.Formats.Gom.GomList list:
+            Console.WriteLine($"{pad}{label} list<{list.ItemType}> [{list.Items.Count}]");
+            foreach (var item in list.Items.Take(DumpSettings.Limit)) PrintValue("-", item, declared?.Item, indent + 1, schema);
+            if (list.Items.Count > DumpSettings.Limit) Console.WriteLine($"{pad}  ... {list.Items.Count - DumpSettings.Limit} more");
+            break;
+        case Swtor.Formats.Gom.GomMap map:
+            Console.WriteLine($"{pad}{label} map<{map.KeyType},{map.ValueType}> [{map.Entries.Count}]");
+            foreach (var e in map.Entries.Take(DumpSettings.Limit))
+                PrintValue($"{Format(e.Key, declared?.Item, schema)} =>", e.Value, declared?.Value, indent + 1, schema);
+            if (map.Entries.Count > DumpSettings.Limit) Console.WriteLine($"{pad}  ... {map.Entries.Count - DumpSettings.Limit} more");
+            break;
+        default:
+            Console.WriteLine($"{pad}{label} {Format(value, declared, schema)}");
+            break;
     }
 }
 
@@ -269,4 +282,41 @@ static string Format(object? value, Swtor.Formats.Gom.GomTypeDescriptor? declare
         return name is null ? $"enum {e.Value}" : $"{name} ({e.Value})";
     }
     return value?.ToString() ?? "null";
+}
+
+// char list: lists all character specs. char spec <name>: prints the options of one spec with their art names.
+static int CharCommand(string[] args)
+{
+    var db = Swtor.Assets.GomDatabase.Open(DefaultRoot());
+    var index = Swtor.Assets.AssetIndex.Load(DefaultRoot());
+    if (args[1] == "list")
+    {
+        foreach (var e in db.WithPrefix("pcs.").OrderBy(e => e.Name)) Console.WriteLine(e.Name);
+        return 0;
+    }
+    var entry = args.Length >= 3 ? db.Find(args[2]) : null;
+    if (entry is null) { Console.Error.WriteLine("Spec not found"); return 1; }
+
+    var spec = Swtor.Assets.CharacterSpec.FromNode(db.Decode(entry))!;
+    Console.WriteLine($"{spec.Name}: class {spec.Class}, gender {spec.Gender}, race {spec.Race}, legacy {spec.IsLegacy}, {spec.Options.Count} options");
+    foreach (var group in spec.Options.GroupBy(o => o.Slot))
+    {
+        Console.WriteLine($"-- {group.Key} ({group.Count()})");
+        foreach (var o in group.Take(args.Length >= 4 ? int.Parse(args[3]) : 5))
+        {
+            var found = index.Appearances.FindAsset(o.AssetId);
+            var material = found?.Asset.Materials.FirstOrDefault(m => m.Id == o.MaterialId.ToString());
+            Console.WriteLine($"   key {o.Key}: asset {o.AssetId} {found?.Asset.ArtName ?? "(unknown)"} [{found?.Slot}] material {o.MaterialId} {material?.Name} {found?.Asset.RepresentativeColor}");
+        }
+    }
+    var first = spec.Options.First(o => o.Slot == Swtor.Assets.AppearanceSlot.Head);
+    Console.WriteLine($"compatible with head option {first.Key}:");
+    foreach (var (slot, keys) in spec.Compatible[first.Key]) Console.WriteLine($"   {slot}: {string.Join(",", keys.Take(20))}{(keys.Count > 20 ? "..." : "")}");
+    return 0;
+}
+
+static class DumpSettings
+{
+    /// <summary>Maximum list or map entries printed by "gom dump". Set SWTOR_DUMP_LIMIT to change it.</summary>
+    public static readonly int Limit = int.TryParse(Environment.GetEnvironmentVariable("SWTOR_DUMP_LIMIT"), out var limit) ? limit : 12;
 }

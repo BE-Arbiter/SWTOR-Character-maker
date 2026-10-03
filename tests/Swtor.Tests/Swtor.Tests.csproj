@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Swtor.Formats\Swtor.Formats.csproj" />
+    <ProjectReference Include="..\..\src\Swtor.Assets\Swtor.Assets.csproj" />
   </ItemGroup>
 
   <ItemGroup>

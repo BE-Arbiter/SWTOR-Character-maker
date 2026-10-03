@@ -94,6 +94,12 @@ public sealed class AssetIndex
     public IEnumerable<string> SearchTextures(string text, int limit) =>
         Textures.Where(t => t.Contains(text, StringComparison.OrdinalIgnoreCase)).Take(limit);
 
+    /// <summary>True if the index has this model (relative path, any slash style, any case).</summary>
+    public bool HasModel(string relative) =>
+        (_modelSet ??= new HashSet<string>(Models, StringComparer.OrdinalIgnoreCase)).Contains(relative.Replace('\\', '/'));
+
+    private HashSet<string>? _modelSet;
+
     public string FullPath(string relative) => Path.Combine(Root, relative.Replace('/', Path.DirectorySeparatorChar));
 
     // "head_x_v01_d.dds" -> "head_x". Other names keep their full stem.

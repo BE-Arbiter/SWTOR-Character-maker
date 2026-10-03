@@ -19,7 +19,8 @@ public sealed record AppearanceAsset(
     string BaseFile,
     IReadOnlyList<string> Attachments,
     IReadOnlyList<AssetMaterial> Materials,
-    IReadOnlyList<string> Bodytypes);
+    IReadOnlyList<string> Bodytypes,
+    string? RepresentativeColor = null);
 
 public static class AppearanceIndexReader
 {
@@ -51,6 +52,7 @@ public static class AppearanceIndexReader
         var attachments = new List<string>();
         var materials = new List<AssetMaterial>();
         var schemeLists = new List<List<string>>();
+        string? representative = null;
         var bodytypes = new List<string>();
 
         // ReadElementContentAsString already moves to the next node, so Read() runs only when nothing was consumed.
@@ -69,6 +71,11 @@ public static class AppearanceIndexReader
                 case "ArtName": artName = xml.ReadElementContentAsString(); break;
                 case "BaseFile": baseFile = xml.ReadElementContentAsString(); break;
                 case "Bodytype": bodytypes.Add(xml.ReadElementContentAsString()); break;
+                case "Data":
+                    // Skin, hair and eye color entries carry a color to show in menus: "r,g,b" in the range 0 to 1.
+                    representative ??= xml.GetAttribute("RepresentativeColor");
+                    xml.Read();
+                    break;
                 case "Attachment":
                     attachments.Add(xml.GetAttribute("filename") ?? "");
                     xml.Read();
@@ -86,6 +93,6 @@ public static class AppearanceIndexReader
                 default: xml.Read(); break;
             }
         }
-        return new AppearanceAsset(id, artName, baseFile, attachments, materials, bodytypes);
+        return new AppearanceAsset(id, artName, baseFile, attachments, materials, bodytypes, representative);
     }
 }

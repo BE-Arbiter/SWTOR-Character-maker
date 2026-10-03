@@ -88,3 +88,12 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Useful objects: `pcs.<class>.<gender>.<race>` (player character specs), `itmAppearanceDatatable` (2,368 item appearances), `pcsSliderDataTablePrototype`.
 - Debug: `swtor gom find <text>`, `swtor gom dump <exact name>`, `swtor gom schema`.
 - Format notes were checked against the public GomLib source (PugTools). Do not copy its code; this repository has its own implementation.
+
+## Character creator data (pcs)
+
+- `pcs.<class>.<gender>.<race>[_legacy]` objects hold the creator options. Field ids are hashes. The ones used are named in `CharacterSpec`. An option is `(slot, asset id, material id)`. Asset ids match `<ID>` in `art/dynamic/<slot>/index.xml`. Material ids match `<Material id>`. Slots are the enum `appSlot*` (`AppearanceSlot`).
+- A second map gives, for each option, the options of other slots that go with it (`CharacterSpec.Compatible`). Heads drive this.
+- Skin, hair and eye color options are assets whose XML is missing, but their index entry has `RepresentativeColor` (average color). `CharacterPanel` multiplies the head texture by the skin color and hair textures by the hair color. This is an approximation.
+- `PartResolver` turns an option into files. In file names, `[bt]` is the body type and `[gen]` is `f` or `m`. Material file names can contain `[bt]` too.
+- The viewer opens `GomDatabase` on a background thread after the index (about 800 MB of memory for the whole process). The Character tab shows "Loading the game database..." until it is ready.
+- Not done yet: body, armor and hands in the creator; real skin/hair shading; eye color on the eye mesh; `--character` starts the viewer on the Character tab.
