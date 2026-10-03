@@ -1,3 +1,4 @@
+using Swtor.Formats;
 using Swtor.Formats.Gom;
 
 namespace Swtor.Assets;
@@ -59,6 +60,34 @@ public sealed class GomDatabase
     /// <summary>Lists objects whose name starts with <paramref name="prefix"/>.</summary>
     public IEnumerable<GomEntry> WithPrefix(string prefix) =>
         Entries.Where(e => e.Name.StartsWith(prefix, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Decodes every object that passes <paramref name="filter"/> and calls <paramref name="action"/> for each.
+    /// Buckets are read once and processed in parallel, so <paramref name="action"/> must be safe to call from several threads.
+    /// Objects that cannot be decoded are skipped.
+    /// </summary>
+    public void ForEachNode(Func<GomEntry, bool> filter, Action<GomEntry, GomNode> action)
+    {
+        var groups = Entries.Where(e => e.PrototypeFile is null && filter(e)).GroupBy(e => e.BucketIndex).ToList();
+        Parallel.ForEach(groups, group =>
+        {
+            var bucket = GomBucketFile.Open(File.ReadAllBytes(Path.Combine(_bucketFolder, $"{group.Key}.bkt")));
+            foreach (var entry in group)
+            {
+                GomNode node;
+                try
+                {
+                    node = bucket.Decode(entry.Info!);
+                }
+                catch (GameFormatException)
+                {
+                    continue;
+                }
+                action(entry, node);
+            }
+        });
+        foreach (var entry in Entries.Where(e => e.PrototypeFile is not null && filter(e))) action(entry, Decode(entry));
+    }
 
     /// <summary>Decodes one object. Safe to call from several threads.</summary>
     public GomNode Decode(GomEntry entry)

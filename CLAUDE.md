@@ -125,3 +125,9 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Weapons are in `art/dynamic/weapon/` (no index.xml). The list comes from the game object `itmAppearanceDatatable` (2,368 appearances): key, combat type enum (`cbtType_*`), model path, attachment socket, blade/glow color, label. See `WeaponCatalog` for the field ids.
 - Texture: `art/shaders/materials/<model stem>.mat` gives the diffuse map. Fallback: same-name texture (`AssetIndex.FindTextures` indexes both `name_vNN` and `name`). About 70% of the weapons have textures in the extract. Some files are missing from the extract, so some weapons show without texture.
 - The "Weapons" tab filters by type and name. `--weapon <key>` opens one at start (for testing). The blade of a lightsaber is an effect, not part of the model. Holding a weapon in a hand needs a skeleton and sockets: not done.
+
+## Item names
+
+- Item names are in `fr-fr/str/itm.stb` (only French is in the extract; `TextTables.Find` picks the first language folder that has the table). `StringTable` reads the format: 3 header bytes, `i32` count, 26 bytes per entry, then the texts. An item's name field is a reference `str.itm#<id>`.
+- `ItemCatalog` links items to art: item (`itm.*`) -> appearance object name (`ipp.*`) -> (slot, asset id, material id). 46,812 items have a name and an appearance. One asset is shown by many items, sorted from the lowest level: the first one is the item that introduced the look, so its name is used as the label.
+- The equipment lists show `item name (+N) [art name]`, can be sorted by item name, art name, item level or quality, and the filter searches all item names of an asset. Building the catalog takes about 4 s on the background thread that opens the game database.

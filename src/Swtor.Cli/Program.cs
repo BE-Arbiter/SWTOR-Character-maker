@@ -15,6 +15,21 @@ if (args.Length >= 1 && args[0] == "index")
 if (args.Length >= 2 && args[0] == "appearance")
     return AppearanceCommand(args);
 
+if (args.Length >= 1 && args[0] == "items")
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var itemDb = Swtor.Assets.GomDatabase.Open(DefaultRoot());
+    string stbPath = Directory.EnumerateFiles(Path.Combine(DefaultRoot(), "fr-fr", "str"), "itm.stb").First();
+    var itemNames = Swtor.Formats.Stb.StringTable.Parse(File.ReadAllBytes(stbPath));
+    var catalog = Swtor.Assets.ItemCatalog.Load(itemDb, itemNames);
+    Console.WriteLine($"{itemNames.Count} texts, {catalog.Count} items with an appearance in {sw.Elapsed}");
+    var itemIndex = Swtor.Assets.AssetIndex.Load(DefaultRoot());
+    foreach (string artName in new[] { "chest_armor01_heavy_bh_a02", "leg_armor01_heavy_bh_a02" })
+        if (itemIndex.Appearances.AssetsOfSlot(artName.Split('_')[0]).FirstOrDefault(a => a.ArtName == artName) is { } asset)
+            foreach (var item in catalog.ForAsset(long.Parse(asset.Id)).Where((_, i) => i % 9 == 0).Take(16)) Console.WriteLine($"  {artName}: {item.Name} (level {item.Level}, {item.QualityName})");
+    return 0;
+}
+
 if (args.Length >= 1 && args[0] == "weapons")
 {
     var weapons = Swtor.Assets.WeaponCatalog.Load(Swtor.Assets.GomDatabase.Open(DefaultRoot()));

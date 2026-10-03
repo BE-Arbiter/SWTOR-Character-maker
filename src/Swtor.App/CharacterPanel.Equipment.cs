@@ -25,7 +25,6 @@ public sealed partial class CharacterPanel
 
     private readonly Dictionary<string, EquipChoice> _equipment = [];
     private readonly Dictionary<string, string> _equipFilter = [];
-    private readonly Dictionary<(string Slot, string? Bodytype), List<AppearanceAsset>> _equipOptions = [];
     private string? _bodytype;
 
     // Adds the bare body or the equipment of each slot to the preview.
@@ -102,111 +101,4 @@ public sealed partial class CharacterPanel
         return (colors.ReadPalette(palettes.Primary), colors.ReadPalette(palettes.Secondary));
     }
 
-    private void DrawEquipment()
-    {
-        if (_index is null) return;
-        ImGui.Text("Equipment");
-        foreach (string slot in EquipSlots)
-        {
-            ImGui.PushID(slot);
-            DrawEquipSlot(slot);
-            ImGui.PopID();
-        }
-    }
-
-    private void DrawEquipSlot(string slot)
-    {
-        _equipment.TryGetValue(slot, out var choice);
-        var options = EquipOptions(slot);
-        ImGui.TextDisabled($"{slot} ({options.Count})");
-
-        _equipFilter.TryGetValue(slot, out string? filter);
-        filter ??= "";
-        ImGui.SetNextItemWidth(110);
-        if (ImGui.InputTextWithHint("##filter", "filter", ref filter, 64)) _equipFilter[slot] = filter;
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.BeginCombo("##asset", choice?.Asset.ArtName ?? (NakedSlots.Contains(slot) ? "(bare)" : "(none)")))
-        {
-            if (ImGui.Selectable(NakedSlots.Contains(slot) ? "(bare)" : "(none)", choice is null))
-            {
-                _equipment.Remove(slot);
-                Rebuild();
-            }
-            int listed = 0;
-            foreach (var asset in options)
-            {
-                if (filter.Length > 0 && !asset.ArtName.Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
-                if (++listed > MaxListed)
-                {
-                    ImGui.TextDisabled("... use the filter");
-                    break;
-                }
-                if (ImGui.Selectable($"{asset.ArtName}##{asset.Id}", asset == choice?.Asset))
-                {
-                    _equipment[slot] = new EquipChoice(asset);
-                    Rebuild();
-                }
-            }
-            ImGui.EndCombo();
-        }
-
-        if (choice is null) return;
-        DrawVariantChoice(choice);
-        DrawSchemeChoice(slot, choice);
-    }
-
-    private void DrawVariantChoice(EquipChoice choice)
-    {
-        var variants = choice.Asset.Materials;
-        if (variants.Count < 2) return;
-        ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##variant", Path.GetFileNameWithoutExtension(variants[choice.Variant].FileName))) return;
-        for (int i = 0; i < variants.Count; i++)
-        {
-            if (!ImGui.Selectable($"{Path.GetFileNameWithoutExtension(variants[i].FileName)}##{i}", i == choice.Variant)) continue;
-            choice.Variant = i;
-            choice.SchemeId = null;
-            Rebuild();
-        }
-        ImGui.EndCombo();
-    }
-
-    private void DrawSchemeChoice(string slot, EquipChoice choice)
-    {
-        var variants = choice.Asset.Materials;
-        if (variants.Count == 0 || _index is null) return;
-        var ids = variants[Math.Min(choice.Variant, variants.Count - 1)].ColorSchemeIds;
-        if (ids.Count == 0) return;
-
-        var colors = _index.Colors;
-        ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##scheme", choice.SchemeId is null ? "(default colors)" : colors.FindScheme(choice.SchemeId)?.Name ?? choice.SchemeId)) return;
-        if (ImGui.Selectable("(default colors)", choice.SchemeId is null))
-        {
-            choice.SchemeId = null;
-            Rebuild();
-        }
-        foreach (string id in ids)
-        {
-            if (colors.FindScheme(id) is not { } scheme || !ImGui.Selectable($"{scheme.Name}##{id}", id == choice.SchemeId)) continue;
-            choice.SchemeId = id;
-            Rebuild();
-        }
-        ImGui.EndCombo();
-    }
-
-    // Assets of a slot that have a model for the current body type. The list is built once per body type.
-    private List<AppearanceAsset> EquipOptions(string slot)
-    {
-        var key = (slot, _bodytype);
-        if (_equipOptions.TryGetValue(key, out var cached)) return cached;
-
-        char gender = _spec?.Gender == "female" ? 'f' : 'm';
-        var list = _index!.Appearances.AssetsOfSlot(slot)
-            .Where(a => a.BaseFile.Length > 0 && !a.ArtName.Contains("_naked_", StringComparison.Ordinal) && PartResolver.HasModel(_index, a, gender, _bodytype))
-            .OrderBy(a => a.ArtName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        return _equipOptions[key] = list;
-    }
 }

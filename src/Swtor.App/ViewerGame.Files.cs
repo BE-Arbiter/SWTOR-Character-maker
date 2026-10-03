@@ -51,6 +51,13 @@ public sealed partial class ViewerGame
         }
     }
 
+    // Reads the item names. Runs on the background thread that opens the game database. Without a text table the lists keep art names.
+    private void LoadItems(GomDatabase database, string root)
+    {
+        if (TextTables.Find(root, "itm.stb") is not { } path) return;
+        _readyItems = ItemCatalog.Load(database, Swtor.Formats.Stb.StringTable.Parse(File.ReadAllBytes(path)));
+    }
+
     private bool SaveCharacter(string path)
     {
         try

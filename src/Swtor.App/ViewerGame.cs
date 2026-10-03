@@ -60,6 +60,7 @@ public sealed partial class ViewerGame : Game
     private CharacterPanel _character = null!;
     private WeaponPanel _weapons = null!;
     private volatile WeaponCatalog? _readyWeapons;
+    private volatile ItemCatalog? _readyItems;
     private ActiveTab _activeTab = ActiveTab.Model;
     private bool _showModelTab, _showCharacterTab;
     private GomDatabase? _gom;
@@ -149,6 +150,11 @@ public sealed partial class ViewerGame : Game
                 _pendingModel = Path.GetRelativePath(_root, _initialModel).Replace('\\', '/');
                 _initialModel = null;
             }
+        }
+        if (_readyItems is { } itemCatalog)
+        {
+            _readyItems = null;
+            _character.SetItems(itemCatalog);
         }
         if (_readyWeapons is { } weaponCatalog)
         {
@@ -247,6 +253,7 @@ public sealed partial class ViewerGame : Game
                 var db = GomDatabase.Open(root);
                 _readyGom = db;
                 _readyWeapons = WeaponCatalog.Load(db);
+                LoadItems(db, root);
                 _readyCatalog = CharacterCatalog.Load(db);
             }
             catch (Exception e) when (e is IOException or GameFormatException or UnauthorizedAccessException)
