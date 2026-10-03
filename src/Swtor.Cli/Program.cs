@@ -85,12 +85,17 @@ static string DefaultRoot() => Environment.GetEnvironmentVariable("SWTOR_ASSETS"
 // dds decode <file> <out.ppm>: writes the image as a PPM file, to view it.
 static int DdsCommand(string[] args)
 {
-    if (args[1] == "decode" && args.Length >= 4)
+    if (args[1] == "decode" && args.Length >= 4) // optional 5th argument "alpha" writes the alpha channel
     {
         var image = Swtor.Formats.Dds.DdsReader.Decode(File.ReadAllBytes(args[2]));
         using var output = File.Create(args[3]);
         output.Write(System.Text.Encoding.ASCII.GetBytes($"P6\n{image.Width} {image.Height}\n255\n"));
-        for (int i = 0; i < image.Width * image.Height; i++) output.Write(image.Rgba.AsSpan(i * 4, 3));
+        bool alpha = args.Length >= 5 && args[4] == "alpha";
+        for (int i = 0; i < image.Width * image.Height; i++)
+        {
+            if (alpha) output.Write([image.Rgba[i * 4 + 3], image.Rgba[i * 4 + 3], image.Rgba[i * 4 + 3]]);
+            else output.Write(image.Rgba.AsSpan(i * 4, 3));
+        }
         return 0;
     }
 

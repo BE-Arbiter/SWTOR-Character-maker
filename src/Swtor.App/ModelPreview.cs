@@ -14,6 +14,9 @@ public sealed class ModelPreview : IDisposable
         public IndexBuffer Indices { get; } = indices;
         public Gr2Piece[] Pieces { get; } = pieces;
         public Texture2D? Texture { get; set; }
+
+        /// <summary>Textures for single material slots. They replace <see cref="Texture"/> for pieces with that material index.</summary>
+        public IReadOnlyDictionary<int, Texture2D>? PieceTextures { get; init; }
     }
 
     private static readonly Color[] PieceColors =
@@ -67,7 +70,7 @@ public sealed class ModelPreview : IDisposable
     /// Adds a model to the scene with its own texture (the caller owns the texture).
     /// Call <see cref="Frame"/> after the last model so the camera fits the scene.
     /// </summary>
-    public void Add(Gr2Model model, Texture2D? texture)
+    public void Add(Gr2Model model, Texture2D? texture, IReadOnlyDictionary<int, Texture2D>? pieceTextures = null)
     {
         var min = _boundsMin;
         var max = _boundsMax;
@@ -91,7 +94,7 @@ public sealed class ModelPreview : IDisposable
             vb.SetData(vertices);
             var ib = new IndexBuffer(_device, IndexElementSize.SixteenBits, mesh.Indices.Length, BufferUsage.WriteOnly);
             ib.SetData(mesh.Indices);
-            _meshes.Add(new GpuMesh(vb, ib, mesh.Pieces.ToArray()) { Texture = texture });
+            _meshes.Add(new GpuMesh(vb, ib, mesh.Pieces.ToArray()) { Texture = texture, PieceTextures = pieceTextures });
         }
         _boundsMin = min;
         _boundsMax = max;
@@ -188,9 +191,10 @@ public sealed class ModelPreview : IDisposable
             _device.Indices = mesh.Indices;
             foreach (var piece in mesh.Pieces)
             {
-                _surface.TextureEnabled = mesh.Texture is not null;
-                _surface.Texture = mesh.Texture;
-                _surface.DiffuseColor = mesh.Texture is not null ? Vector3.One : PieceColors[piece.MaterialIndex % PieceColors.Length].ToVector3();
+                var pieceTexture = mesh.PieceTextures is not null && mesh.PieceTextures.TryGetValue(piece.MaterialIndex, out var own) ? own : mesh.Texture;
+                _surface.TextureEnabled = pieceTexture is not null;
+                _surface.Texture = pieceTexture;
+                _surface.DiffuseColor = pieceTexture is not null ? Vector3.One : PieceColors[piece.MaterialIndex % PieceColors.Length].ToVector3();
                 _surface.CurrentTechnique.Passes[0].Apply();
                 _device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, piece.StartTriangle * 3, piece.TriangleCount);
             }

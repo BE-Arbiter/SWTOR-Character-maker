@@ -9,8 +9,13 @@ namespace Swtor.Assets;
 /// <param name="MaskPath">Relative path of the color mask .dds file, or null.</param>
 /// <param name="Bodytype">The body type used for the file names, for example "bma". Null if the asset has none.</param>
 /// <param name="Attachments">Extra model files of the asset that exist (for example shoulder pieces). They share the material.</param>
+/// <param name="Overrides">Materials that replace the material of a mesh slot, keyed by slot index. Null if none.</param>
 public sealed record ResolvedPart(
-    string ModelPath, string? DiffusePath, string? MaskPath, string? Bodytype, IReadOnlyList<string> Attachments);
+    string ModelPath, string? DiffusePath, string? MaskPath, string? Bodytype, IReadOnlyList<string> Attachments,
+    IReadOnlyDictionary<int, ResolvedMaterial>? Overrides = null);
+
+/// <summary>Textures of a material that replaces the material of one mesh slot (for example the eyes of a head).</summary>
+public sealed record ResolvedMaterial(string? DiffusePath, string? MaskPath);
 
 /// <summary>Turns a creator option or an asset into files.</summary>
 public static class PartResolver
@@ -51,14 +56,14 @@ public static class PartResolver
         var attachments = asset.Attachments.Select(a => Expand(a, matchedBodytype ?? "")).Where(index.HasModel).ToList();
 
         var material = asset.Materials.FirstOrDefault(m => m.Id == materialId) ?? asset.Materials.FirstOrDefault();
-        string? diffuse = null, mask = null;
-        if (material is not null && index.Appearances.ReadMaterial(material, matchedGender ?? gender, matchedBodytype) is { } def)
+        ResolvedMaterial main = material is null ? new(null, null) : Textures(index, material, matchedGender ?? gender, matchedBodytype);
+        Dictionary<int, ResolvedMaterial>? overrides = null;
+        foreach (var over in material?.Overrides ?? [])
         {
-            diffuse = Existing(index, def.DiffuseMap);
-            string? maskPath = def.TexturePath("PaletteMaskMap");
-            mask = maskPath is not null && !maskPath.StartsWith("art/defaultassets", StringComparison.OrdinalIgnoreCase) ? Existing(index, maskPath) : null;
+            overrides ??= [];
+            overrides[over.Index] = Textures(index, new AssetMaterial("", "", over.FileName, []), matchedGender ?? gender, matchedBodytype);
         }
-        return new ResolvedPart(model, diffuse, mask, matchedBodytype, attachments);
+        return new ResolvedPart(model, main.DiffusePath, main.MaskPath, matchedBodytype, attachments, overrides);
     }
 
     /// <summary>Cheap check: true if a model file exists for the asset with a suitable body type (no material is read).</summary>
@@ -67,6 +72,23 @@ public static class PartResolver
         if (asset.Bodytypes.Count == 0) return index.HasModel(Expand(asset.BaseFile, ""));
         return asset.Bodytypes.Any(b => index.HasModel(Expand(asset.BaseFile, b))
             && (preferredBodytype is null || b.Equals(preferredBodytype, StringComparison.OrdinalIgnoreCase) || (b.Length >= 2 && char.ToLowerInvariant(b[1]) == gender)));
+    }
+
+    // Diffuse and color mask files of one material. Default black or white masks count as no mask.
+    private static ResolvedMaterial Textures(AssetIndex index, AssetMaterial material, char gender, string? bodytype)
+    {
+        if (index.Appearances.ReadMaterial(material, gender, bodytype) is not { } def) return new ResolvedMaterial(null, null);
+        string? maskPath = def.TexturePath("PaletteMaskMap");
+        string? mask = maskPath is not null && !maskPath.StartsWith("art/defaultassets", StringComparison.OrdinalIgnoreCase) ? Existing(index, maskPath) : null;
+        return new ResolvedMaterial(Existing(index, def.DiffuseMap), mask);
+    }
+
+    /// <summary>Relative path of the texture of an overlay asset (complexion, face paint, age). These assets name a .dds file as their base file.</summary>
+    public static string? OverlayPath(AssetIndex index, AppearanceAsset asset, string? bodytype)
+    {
+        if (asset.BaseFile.Length == 0 || !asset.BaseFile.EndsWith(".dds", StringComparison.OrdinalIgnoreCase)) return null;
+        string path = Expand(asset.BaseFile, bodytype ?? "");
+        return File.Exists(index.FullPath(path)) ? path : null;
     }
 
     private static string Expand(string file, string bodytype) =>

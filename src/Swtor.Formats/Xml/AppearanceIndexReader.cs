@@ -6,7 +6,12 @@ namespace Swtor.Formats.Xml;
 /// A material variant of an asset. <see cref="FileName"/> may contain the "[gen]" placeholder.
 /// <see cref="ColorSchemeIds"/> lists the color schemes (see <see cref="ColorSchemeIndexReader"/>) allowed for this variant.
 /// </summary>
-public sealed record AssetMaterial(string Id, string Name, string FileName, IReadOnlyList<string> ColorSchemeIds);
+public sealed record AssetMaterial(
+    string Id, string Name, string FileName, IReadOnlyList<string> ColorSchemeIds,
+    IReadOnlyList<MaterialOverride>? Overrides = null);
+
+/// <summary>Replaces the material of one mesh slot (<see cref="Index"/>) with another material file. Used for eyes on heads.</summary>
+public sealed record MaterialOverride(int Index, string FileName);
 
 /// <summary>
 /// One entry of a slot <c>index.xml</c> (art/dynamic/&lt;slot&gt;/index.xml):
@@ -52,6 +57,7 @@ public static class AppearanceIndexReader
         var attachments = new List<string>();
         var materials = new List<AssetMaterial>();
         var schemeLists = new List<List<string>>();
+        var overrideLists = new List<List<MaterialOverride>>();
         string? representative = null;
         var bodytypes = new List<string>();
 
@@ -82,7 +88,13 @@ public static class AppearanceIndexReader
                     break;
                 case "Material":
                     schemeLists.Add([]);
-                    materials.Add(new AssetMaterial(xml.GetAttribute("id") ?? "", xml.GetAttribute("name") ?? "", xml.GetAttribute("filename") ?? "", schemeLists[^1]));
+                    overrideLists.Add([]);
+                    materials.Add(new AssetMaterial(xml.GetAttribute("id") ?? "", xml.GetAttribute("name") ?? "", xml.GetAttribute("filename") ?? "", schemeLists[^1], overrideLists[^1]));
+                    xml.Read();
+                    break;
+                case "MaterialOverride" when overrideLists.Count > 0:
+                    if (int.TryParse(xml.GetAttribute("index"), out int overrideIndex))
+                        overrideLists[^1].Add(new MaterialOverride(overrideIndex, xml.GetAttribute("filename") ?? ""));
                     xml.Read();
                     break;
                 case "ColorScheme" when schemeLists.Count > 0:

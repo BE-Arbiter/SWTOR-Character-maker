@@ -14,10 +14,10 @@ using Vector4 = System.Numerics.Vector4;
 
 namespace Swtor.App;
 
-/// <summary>Main window. Layout: menu bar on top, then explorer 25%, 3D preview 40%, details 35%.</summary>
+/// <summary>Main window. Layout: menu bar on top, then explorer 18%, 3D preview 57%, details 25%.</summary>
 public sealed partial class ViewerGame : Game
 {
-    private const float LeftShare = 0.25f, CenterShare = 0.40f;
+    private const float LeftShare = 0.18f, CenterShare = 0.57f;
     private const ImGuiWindowFlags PanelFlags = ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize
         | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoBringToFrontOnFocus;
     private static readonly Vector4 ErrorColor = new(1, 0.5f, 0.4f, 1);

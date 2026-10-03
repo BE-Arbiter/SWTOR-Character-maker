@@ -72,6 +72,11 @@ public sealed partial class CharacterPanel
             if (OptionFor(slot) is not { } option) continue;
             if (PartResolver.Resolve(_index, option, gender, headPart?.Bodytype) is not { } part) continue;
             if (slot == AppearanceSlot.Head) headPart = part;
+            if (slot == AppearanceSlot.Head)
+            {
+                AddHead(part);
+                continue;
+            }
             AddModel(part.ModelPath, LoadTexture(part, TintFor(slot)), slot.ToString());
         }
 
@@ -272,35 +277,29 @@ public sealed partial class CharacterPanel
         return color is null ? null : ParseColor(color);
     }
 
-    private Texture2D? LoadTexture(ResolvedPart part, Vector4? tint, Palette? primary = null, Palette? secondary = null)
+    private Texture2D? LoadTexture(ResolvedPart part, Vector4? tint, Palette? primary = null, Palette? secondary = null) =>
+        LoadTexture(part.DiffusePath, part.MaskPath, tint, primary, secondary, null);
+
+    // Builds a texture. <paramref name="tint"/> is the wanted average color of the masked area (see ImageColor.MatchAverage).
+    // <paramref name="after"/> can add overlays (complexion, face paint) after the color change.
+    private Texture2D? LoadTexture(string? diffusePath, string? maskPath, Vector4? tint, Palette? primary, Palette? secondary, Func<DdsImage, DdsImage>? after)
     {
-        if (part.DiffusePath is null || _index is null) return null;
+        if (diffusePath is null || _index is null) return null;
         try
         {
-            var image = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(part.DiffusePath)));
-            if (tint is { } t) Multiply(image, t);
-            if ((primary is not null || secondary is not null) && part.MaskPath is not null)
-                image = PaletteTint.Apply(image, DdsReader.Decode(File.ReadAllBytes(_index.FullPath(part.MaskPath))), primary, secondary);
+            var image = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(diffusePath)));
+            DdsImage? mask = maskPath is null ? null : DdsReader.Decode(File.ReadAllBytes(_index.FullPath(maskPath)));
+            if (tint is { } t) image = ImageColor.MatchAverage(image, mask, new Vector3(t.X, t.Y, t.Z));
+            if (primary is not null || secondary is not null) image = PaletteTint.Apply(image, mask, primary, secondary);
+            if (after is not null) image = after(image);
             var texture = TextureLoader.Create(_device, image);
             _textures.Add(texture);
             return texture;
         }
         catch (Exception e) when (e is GameFormatException or IOException)
         {
-            _error = $"{Path.GetFileName(part.DiffusePath)}: {e.Message}";
+            _error = $"{Path.GetFileName(diffusePath)}: {e.Message}";
             return null;
-        }
-    }
-
-    // Multiplies the color channels of an image in place.
-    private static void Multiply(DdsImage image, Vector4 color)
-    {
-        byte[] p = image.Rgba;
-        for (int i = 0; i < p.Length; i += 4)
-        {
-            p[i] = (byte)(p[i] * color.X);
-            p[i + 1] = (byte)(p[i + 1] * color.Y);
-            p[i + 2] = (byte)(p[i + 2] * color.Z);
         }
     }
 

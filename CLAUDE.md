@@ -112,3 +112,10 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Default folder: `Documents\SWTOR Character Maker\Characters`. Menu File > Save character / Load character. `--load file.json` loads a file at start.
 - Loading skips choices that no longer exist and keeps the defaults for them. Loading before the game database is ready is queued (`CharacterPanel.Apply`).
 - Not tested by an automatic test: the ImGui dialogs. The JSON, the load path and `ToSave` were checked by hand.
+
+## Skin and eyes
+
+- Skin: the head diffuse already has a light skin color. `ImageColor.MatchAverage` moves the average of the masked area (red channel of `PaletteMaskMap`) to the representative skin color and keeps the detail. Lips and teeth are outside the mask. Body parts and hair use the same function.
+- Complexion (eyebrows, blush) multiplies the skin texture. Face paint is drawn over it with its alpha. These option assets name a `.dds` file as their base file (`PartResolver.OverlayPath`). The age overlay is not applied yet.
+- Eyes: a head material has `MaterialOverride index="1"` that gives the eye material. Mesh slot 1 of the head is the eye. The iris is the red area of its mask and gets the eye color.
+- All of this approximates the game shader. Layout of the window: 18% models, 57% preview, 25% details.
