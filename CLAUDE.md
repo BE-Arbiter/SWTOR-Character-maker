@@ -66,6 +66,7 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 
 - The explorer lists only models (`.gr2`, not `.lod.gr2`). Do not add other file types to it.
 - NPC and creature models find textures by name: `name.gr2` -> `name_v01_d.dds` (`_d` diffuse, `_n` normal, `_s`/`_h` other maps). `AssetIndex.FindTextures` does this.
-- Player parts (head, chest, hair, ...) have no same-name texture. They come from GOM appearance data, which is not read yet.
+- Player parts (head, chest, hair, ...) have no same-name texture. The link is: slot `art/dynamic/<slot>/index.xml` -> asset (model + material variants) -> `.mat` file (`art/shaders/materials`) -> `DiffuseMap`. `AppearanceCatalog` does this. In file names, `[bt]` is the body type (`bfa`, `bma`, ...) and `[gen]` is `f` or `m`, the second letter of the body type. The `.gr2` own material name is always a placeholder ("default").
+- Colors (palettes, `ColorScheme` guids, skin tones) are in GOM data (`systemgenerated/*.node`, `.bkt`: zstd, custom format). Not read yet. Models show the untinted texture.
 - DDS: BC1/BC2/BC3 and uncompressed BGRA/BGRX cover 224,737 of 224,780 files. The rest are DX10 minimaps and broken files. No BC5/BC7 is used.
 - UV V is not flipped. Textures look correct as is.

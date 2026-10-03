@@ -12,6 +12,9 @@ if (args.Length >= 1 && args[0] == "index")
     return 0;
 }
 
+if (args.Length >= 2 && args[0] == "appearance")
+    return AppearanceCommand(args);
+
 if (args.Length >= 2 && args[0] == "dds")
     return DdsCommand(args);
 
@@ -110,4 +113,45 @@ static int DdsCommand(string[] args)
     foreach (var (f, c) in formats.OrderByDescending(x => x.Value)) Console.WriteLine($"  {f}: {c}");
     foreach (var (msg, (c, ex)) in errors.OrderByDescending(x => x.Value.Count)) Console.WriteLine($"  ERROR {c} x {msg}  e.g. {ex}");
     return errors.Count == 0 ? 0 : 2;
+}
+
+// appearance find <model>: lists the assets and materials for one model (path relative to the root).
+// appearance survey: checks, for every model with an asset, that the first material and its diffuse texture exist.
+static int AppearanceCommand(string[] args)
+{
+    var index = Swtor.Assets.AssetIndex.Load(DefaultRoot());
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var catalog = index.Appearances;
+    Console.WriteLine($"{catalog.AssetCount} assets in {catalog.Slots.Count} slots, loaded in {sw.Elapsed}");
+
+    if (args[1] == "find" && args.Length >= 3)
+    {
+        foreach (var match in catalog.Find(args[2]))
+        {
+            Console.WriteLine($"{match.Asset.ArtName} (slot {match.Slot}, gender {match.Gender}, attachment {match.IsAttachment})");
+            foreach (var material in match.Asset.Materials)
+            {
+                var def = catalog.ReadMaterial(material, match.Gender);
+                Console.WriteLine($"  {material.Name}: {material.FileName} -> {def?.DiffuseMap ?? "(missing)"}");
+            }
+        }
+        return 0;
+    }
+
+    int withAsset = 0, noMaterial = 0, noTexture = 0, ok = 0;
+    string? exampleNoTexture = null;
+    foreach (var model in index.Models)
+    {
+        var matches = catalog.Find(model);
+        if (matches.Count == 0) continue;
+        withAsset++;
+        var first = matches[0];
+        var def = first.Asset.Materials.Count > 0 ? catalog.ReadMaterial(first.Asset.Materials[0], first.Gender) : null;
+        if (def is null) { noMaterial++; continue; }
+        string? diffuse = def.DiffuseMap;
+        if (diffuse is null || !File.Exists(index.FullPath(diffuse + ".dds"))) { noTexture++; exampleNoTexture ??= $"{model} -> {diffuse}"; continue; }
+        ok++;
+    }
+    Console.WriteLine($"models {index.Models.Count}, with asset {withAsset}: texture found {ok}, no material {noMaterial}, texture missing {noTexture} (e.g. {exampleNoTexture})");
+    return 0;
 }

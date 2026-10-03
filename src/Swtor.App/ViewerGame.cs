@@ -8,6 +8,7 @@ using Swtor.Assets;
 using Swtor.Formats;
 using Swtor.Formats.Dds;
 using Swtor.Formats.Gr2;
+using Swtor.Formats.Xml;
 using Vector2 = System.Numerics.Vector2;
 using Vector4 = System.Numerics.Vector4;
 
@@ -40,6 +41,8 @@ public sealed class ViewerGame : Game
     private Gr2Model? _model;
     private string? _modelPath;
     private IReadOnlyList<string> _textureCandidates = [];
+    private IReadOnlyList<AppearanceMatch> _matches = [];
+    private int _matchIndex, _variantIndex;
     private Texture2D? _texture;
     private IntPtr _textureId;
     private string? _texturePath;
@@ -287,9 +290,8 @@ public sealed class ViewerGame : Game
     private void DrawTextureSection()
     {
         ImGui.Separator();
+        DrawAppearance();
         ImGui.Text("Texture");
-        if (_textureCandidates.Count == 0)
-            ImGui.TextDisabled("No texture with the same name. Player parts use appearance data (not read yet).");
 
         ImGui.SetNextItemWidth(-1);
         if (ImGui.BeginCombo("##texture", _texturePath ?? "(none)"))
@@ -318,6 +320,76 @@ public sealed class ViewerGame : Game
         }
     }
 
+    // Assets from index.xml that use this model, and the material variants of the chosen asset.
+    private void DrawAppearance()
+    {
+        if (_matches.Count == 0)
+        {
+            ImGui.TextDisabled("No asset (index.xml) uses this model.");
+            return;
+        }
+
+        var match = _matches[_matchIndex];
+        ImGui.Text($"Asset ({_matches.Count}) - slot {match.Slot}{(match.IsAttachment ? ", attachment" : "")}");
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo("##asset", match.Asset.ArtName))
+        {
+            for (int i = 0; i < _matches.Count; i++)
+                if (ImGui.Selectable($"{_matches[i].Asset.ArtName}##a{i}", i == _matchIndex)) SelectAsset(i);
+            ImGui.EndCombo();
+        }
+
+        var variants = match.Asset.Materials;
+        if (variants.Count == 0) return;
+        ImGui.Text($"Material variant ({variants.Count})");
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo("##variant", Path.GetFileNameWithoutExtension(variants[_variantIndex].FileName)))
+        {
+            for (int i = 0; i < variants.Count; i++)
+                if (ImGui.Selectable($"{Path.GetFileNameWithoutExtension(variants[i].FileName)}##v{i}", i == _variantIndex))
+                    SelectVariant(i);
+            ImGui.EndCombo();
+        }
+    }
+
+    private void SelectAsset(int index)
+    {
+        _matchIndex = index;
+        _variantIndex = 0;
+        ApplyFirstUsableVariant();
+    }
+
+    private void SelectVariant(int index)
+    {
+        _variantIndex = index;
+        _pendingTexture = VariantTexture(_matches[_matchIndex], index) ?? "";
+    }
+
+    // Tries the variants of the current asset in order. Stops at the first one that has a texture file.
+    private void ApplyFirstUsableVariant()
+    {
+        var match = _matches[_matchIndex];
+        for (int i = 0; i < match.Asset.Materials.Count; i++)
+        {
+            if (VariantTexture(match, i) is not { } texture) continue;
+            _variantIndex = i;
+            ApplyTexture(texture);
+            return;
+        }
+        ApplyTexture(null);
+    }
+
+    // Relative path of the diffuse texture of one material variant, or null if the material or file is missing.
+    private string? VariantTexture(AppearanceMatch match, int variant)
+    {
+        if (_index is null) return null;
+        var material = _index.Appearances.ReadMaterial(match.Asset.Materials[variant], match.Gender);
+        string? diffuse = material?.DiffuseMap;
+        if (diffuse is null) return null;
+        string path = diffuse + ".dds";
+        return File.Exists(_index.FullPath(path)) ? path : null;
+    }
+
     // Loads on the game thread. Parsing takes a few milliseconds per file.
     private void LoadModel(string relative)
     {
@@ -329,7 +401,10 @@ public sealed class ViewerGame : Game
             _error = null;
             _preview.Load(_model);
             _textureCandidates = _index.FindTextures(relative);
-            ApplyTexture(_textureCandidates.Count > 0 ? _textureCandidates[0] : null);
+            _matches = _index.Appearances.Find(relative);
+            _matchIndex = _variantIndex = 0;
+            if (_matches.Count > 0) ApplyFirstUsableVariant();
+            else ApplyTexture(_textureCandidates.Count > 0 ? _textureCandidates[0] : null);
         }
         catch (Exception e) when (e is GameFormatException or IOException)
         {
