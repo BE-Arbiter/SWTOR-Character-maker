@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Swtor.Cli/Swtor.Cli.csproj" />
+    <Project Path="src/Swtor.Formats/Swtor.Formats.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Swtor.Tests/Swtor.Tests.csproj" />
+  </Folder>
+</Solution>
