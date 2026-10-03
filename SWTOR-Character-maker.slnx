@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Swtor.App/Swtor.App.csproj" />
     <Project Path="src/Swtor.Cli/Swtor.Cli.csproj" />
     <Project Path="src/Swtor.Formats/Swtor.Formats.csproj" />
   </Folder>

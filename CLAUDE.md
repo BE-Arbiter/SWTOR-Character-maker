@@ -14,7 +14,7 @@ Solution layout (`src/`):
 4. `Swtor.Tests`: xUnit. Uses small fixture files only.
 5. `Swtor.Cli`: debug commands (`gr2 info <file>`, `gr2 survey [root]`). Use it to check parsers against the full tree.
 
-Only `Swtor.Formats`, `Swtor.Cli` and `Swtor.Tests` exist so far. `Swtor.Assets` and `Swtor.App` are planned.
+`Swtor.App` is the MonoGame DesktopGL viewer with Dear ImGui panels (`ViewerGame.cs`). `Swtor.Assets` is still planned.
 
 Why this split: parsing is slow and format-heavy. It runs once, behind the cache. The render loop only touches ready GPU buffers.
 
@@ -55,3 +55,9 @@ dotnet build
 dotnet test
 dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser check
 ```
+
+## UI notes
+
+- The `MonoGame.ImGuiNet` NuGet package ships its DLL at the package root, not in `lib/`. The csproj references it with a `HintPath`. Its namespace is `MonoGame.ImGuiNet`. It pulls an older ImGui.NET (no `ImGuiChildFlags`, `IniFilename` is read-only).
+- `System.Numerics` and `Microsoft.Xna.Framework` both define `Vector2/3/4`. In UI files, alias the one you need.
+- Run the viewer with a model: `dotnet run --project src/Swtor.App -- <file.gr2>`.
