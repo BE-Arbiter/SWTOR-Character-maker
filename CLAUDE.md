@@ -119,3 +119,9 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Complexion (eyebrows, blush) multiplies the skin texture. Face paint is drawn over it with its alpha. These option assets name a `.dds` file as their base file (`PartResolver.OverlayPath`). The age overlay is not applied yet.
 - Eyes: a head material has `MaterialOverride index="1"` that gives the eye material. Mesh slot 1 of the head is the eye. The iris is the red area of its mask and gets the eye color.
 - All of this approximates the game shader. Layout of the window: 18% models, 57% preview, 25% details.
+
+## Weapons
+
+- Weapons are in `art/dynamic/weapon/` (no index.xml). The list comes from the game object `itmAppearanceDatatable` (2,368 appearances): key, combat type enum (`cbtType_*`), model path, attachment socket, blade/glow color, label. See `WeaponCatalog` for the field ids.
+- Texture: `art/shaders/materials/<model stem>.mat` gives the diffuse map. Fallback: same-name texture (`AssetIndex.FindTextures` indexes both `name_vNN` and `name`). About 70% of the weapons have textures in the extract. Some files are missing from the extract, so some weapons show without texture.
+- The "Weapons" tab filters by type and name. `--weapon <key>` opens one at start (for testing). The blade of a lightsaber is an effect, not part of the model. Holding a weapon in a hand needs a skeleton and sockets: not done.

@@ -15,6 +15,18 @@ if (args.Length >= 1 && args[0] == "index")
 if (args.Length >= 2 && args[0] == "appearance")
     return AppearanceCommand(args);
 
+if (args.Length >= 1 && args[0] == "weapons")
+{
+    var weapons = Swtor.Assets.WeaponCatalog.Load(Swtor.Assets.GomDatabase.Open(DefaultRoot()));
+    var weaponIndex = Swtor.Assets.AssetIndex.Load(DefaultRoot());
+    Console.WriteLine($"{weapons.Items.Count} weapons");
+    foreach (var w in weapons.Items.Where(w => weaponIndex.HasModel(w.ModelPath) && weaponIndex.FindTextures(w.ModelPath).Count == 0).Take(args.Contains("--missing") ? 12 : 0))
+        Console.WriteLine($"  no texture: {w.ModelPath}");
+    foreach (var g in weapons.Items.GroupBy(w => w.CombatType).OrderByDescending(g => g.Count()))
+        Console.WriteLine($"  {g.Key}: {g.Count()} (model found {g.Count(w => weaponIndex.HasModel(w.ModelPath))}, textured {g.Count(w => weaponIndex.FindTextures(w.ModelPath).Count > 0)})");
+    return 0;
+}
+
 if (args.Length >= 2 && args[0] == "char")
     return CharCommand(args);
 

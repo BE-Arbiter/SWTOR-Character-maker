@@ -42,9 +42,13 @@ public sealed class AssetIndex
         _texturesByPrefix = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in textures)
         {
-            string key = TexturePrefix(Path.GetFileName(t));
-            if (!_texturesByPrefix.TryGetValue(key, out var list)) _texturesByPrefix[key] = list = [];
-            list.Add(t);
+            string name = Path.GetFileName(t);
+            // Two keys: the name without "_vNN_d" (NPC models) and the name without "_d" (models that have "_vNN" in their own name, like weapons).
+            foreach (string key in new[] { TexturePrefix(name), Path.GetFileNameWithoutExtension(name) is var stem && stem.EndsWith("_d", StringComparison.Ordinal) ? stem[..^2] : stem }.Distinct())
+            {
+                if (!_texturesByPrefix.TryGetValue(key, out var list)) _texturesByPrefix[key] = list = [];
+                list.Add(t);
+            }
         }
     }
 

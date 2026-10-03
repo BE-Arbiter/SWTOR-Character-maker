@@ -56,8 +56,10 @@ public sealed partial class ViewerGame : Game
     private List<string> _textureResults = [];
 
     // Character creator and the game database. The database opens on a background thread.
-    private enum ActiveTab { None, Model, Character }
+    private enum ActiveTab { None, Model, Character, Weapons }
     private CharacterPanel _character = null!;
+    private WeaponPanel _weapons = null!;
+    private volatile WeaponCatalog? _readyWeapons;
     private ActiveTab _activeTab = ActiveTab.Model;
     private bool _showModelTab, _showCharacterTab;
     private GomDatabase? _gom;
@@ -70,7 +72,7 @@ public sealed partial class ViewerGame : Game
     private string _folderInput = "";
 
     public ViewerGame(string? initialModel = null, string? initialScheme = null, bool startOnCharacter = false,
-        IEnumerable<(string Slot, string ArtName)>? equipment = null, string? loadPath = null)
+        IEnumerable<(string Slot, string ArtName)>? equipment = null, string? loadPath = null, string? weaponKey = null)
     {
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -91,12 +93,15 @@ public sealed partial class ViewerGame : Game
         _showCharacterTab = startOnCharacter;
         _startupEquipment = equipment?.ToList();
         _startupLoadPath = loadPath;
+        _startupWeapon = weaponKey;
+        if (weaponKey is not null) _showWeaponsTab = true;
         if (loadPath is not null) _showCharacterTab = true;
     }
 
     private string? _initialModel, _initialScheme;
     private List<(string Slot, string ArtName)>? _startupEquipment;
-    private readonly string? _startupLoadPath;
+    private readonly string? _startupLoadPath, _startupWeapon;
+    private bool _showWeaponsTab;
 
     // Save and load dialogs.
     private enum FileDialog { None, Save, Load }
@@ -114,8 +119,10 @@ public sealed partial class ViewerGame : Game
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
         _preview = new ModelPreview(GraphicsDevice);
         _character = new CharacterPanel(GraphicsDevice, _preview);
+        _weapons = new WeaponPanel(GraphicsDevice, _preview);
         if (_startupEquipment is not null) _character.SetStartupEquipment(_startupEquipment);
         if (_startupLoadPath is not null) LoadCharacter(_startupLoadPath);
+        if (_startupWeapon is not null) _weapons.SelectByKey(_startupWeapon);
 
         _folderInput = Environment.GetEnvironmentVariable("SWTOR_ASSETS") ?? @"C:\jka_tor_assets\resources";
         StartIndexing(_folderInput, rescan: false);
@@ -142,6 +149,11 @@ public sealed partial class ViewerGame : Game
                 _pendingModel = Path.GetRelativePath(_root, _initialModel).Replace('\\', '/');
                 _initialModel = null;
             }
+        }
+        if (_readyWeapons is { } weaponCatalog)
+        {
+            _readyWeapons = null;
+            _weapons.SetData(_index, weaponCatalog);
         }
         if (_readyCatalog is { } catalog)
         {
@@ -234,6 +246,7 @@ public sealed partial class ViewerGame : Game
             {
                 var db = GomDatabase.Open(root);
                 _readyGom = db;
+                _readyWeapons = WeaponCatalog.Load(db);
                 _readyCatalog = CharacterCatalog.Load(db);
             }
             catch (Exception e) when (e is IOException or GameFormatException or UnauthorizedAccessException)
@@ -334,12 +347,22 @@ public sealed partial class ViewerGame : Game
                 _character.Draw();
                 ImGui.EndTabItem();
             }
+            var weaponFlags = _showWeaponsTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            _showWeaponsTab = false;
+            bool weaponsOpen = true;
+            if (ImGui.BeginTabItem("Weapons", ref weaponsOpen, weaponFlags))
+            {
+                active = ActiveTab.Weapons;
+                _weapons.Draw();
+                ImGui.EndTabItem();
+            }
             ImGui.EndTabBar();
 
             if (active != ActiveTab.None && active != _activeTab)
             {
                 _activeTab = active;
                 if (active == ActiveTab.Character) _character.Rebuild();
+                else if (active == ActiveTab.Weapons) _weapons.Rebuild();
                 else if (_model is not null) _preview.Load(_model);
                 if (active == ActiveTab.Model && _baseImage is not null) RebuildTexture();
             }
