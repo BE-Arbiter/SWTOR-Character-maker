@@ -77,3 +77,14 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Mask texture (`PaletteMaskMap`, `_m`): red = primary area, green = secondary area. `PaletteTint` recolors on the CPU. **The real shader is unknown, so the result is an approximation.** Do not describe it as exact.
 - Skin, hair and eye color XML files are not in the extract (only index entries with a representative color). They need GOM data.
 - Run the viewer with a scheme: `dotnet run --project src/Swtor.App -- <file.gr2> <scheme guid>`.
+
+## GOM (game object database)
+
+- Files: `systemgenerated/buckets/*.bkt` (715k objects, zstd, one frame per object), `prototypes/*.node` (10k objects, not compressed), `client.gom` (type definitions: enums, classes, fields). All 726,494 objects decode with exact byte consumption (`swtor gom survey`, about 5 s, must report 0 failures).
+- Numbers are prefix varints (`GomReader`). Object data describes itself: each field has an id (64-bit hash of the field name, stored as a delta) and a type byte. `GomObjectReader` needs no schema to read values.
+- Alignment of records is relative to the start of the `DBLB` tag, not the file. A bucket record: `u32 length` (includes itself), `u64 id` at +8, `u16 data offset` at +0x12, `u16 name offset` at +0x14, `u64 class id` at +0x18, `i16 glommed count` at +0x24, `i32 object size` at +0x28.
+- **Names are not in the files.** Field and class names are hashes. Only enum value names (for example `appSlotAge`) and object names (`pcs.trooper.male.human`) are readable. Work out the meaning of a field from its values. `GomSchema` gives declared types and enum names.
+- `GomDatabase` (Swtor.Assets) opens all headers in about 3 s and keeps them in memory (hundreds of MB). Do not open it at viewer start. Open it only for a feature that needs it.
+- Useful objects: `pcs.<class>.<gender>.<race>` (player character specs), `itmAppearanceDatatable` (2,368 item appearances), `pcsSliderDataTablePrototype`.
+- Debug: `swtor gom find <text>`, `swtor gom dump <exact name>`, `swtor gom schema`.
+- Format notes were checked against the public GomLib source (PugTools). Do not copy its code; this repository has its own implementation.

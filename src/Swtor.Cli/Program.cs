@@ -15,6 +15,9 @@ if (args.Length >= 1 && args[0] == "index")
 if (args.Length >= 2 && args[0] == "appearance")
     return AppearanceCommand(args);
 
+if (args.Length >= 2 && args[0] == "gom")
+    return GomCommand(args);
+
 if (args.Length >= 2 && args[0] == "dds")
     return DdsCommand(args);
 
@@ -154,4 +157,116 @@ static int AppearanceCommand(string[] args)
     }
     Console.WriteLine($"models {index.Models.Count}, with asset {withAsset}: texture found {ok}, no material {noMaterial}, texture missing {noTexture} (e.g. {exampleNoTexture})");
     return 0;
+}
+
+// gom survey: decodes every object of every bucket and prototype file and reports failures.
+// gom find <text>: lists objects whose name contains the text.
+// gom dump <exact name>: prints one decoded object.
+static int GomCommand(string[] args)
+{
+    string gomRoot = Path.Combine(DefaultRoot(), "systemgenerated");
+    var bucketFiles = Directory.GetFiles(Path.Combine(gomRoot, "buckets"), "*.bkt");
+    var nodeFiles = Directory.GetFiles(Path.Combine(gomRoot, "prototypes"), "*.node");
+
+    if (args[1] == "survey")
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var errors = new System.Collections.Concurrent.ConcurrentDictionary<string, (int Count, string Example)>();
+        long ok = 0, failed = 0;
+        void Fail(string where, Exception e)
+        {
+            Interlocked.Increment(ref failed);
+            string key = e is GameFormatException ? e.Message[..Math.Max(0, e.Message.LastIndexOf(" (offset", StringComparison.Ordinal))] : e.GetType().Name + ": " + e.Message;
+            errors.AddOrUpdate(key, (1, where), (_, old) => (old.Count + 1, old.Example));
+        }
+        Parallel.ForEach(bucketFiles, file =>
+        {
+            Swtor.Formats.Gom.GomBucketFile bucket;
+            try { bucket = Swtor.Formats.Gom.GomBucketFile.Open(File.ReadAllBytes(file)); }
+            catch (Exception e) { Fail(file, e); return; }
+            foreach (var info in bucket.Nodes)
+            {
+                try { bucket.Decode(info); Interlocked.Increment(ref ok); }
+                catch (Exception e) when (e is GameFormatException or InvalidDataException or ArgumentException or IndexOutOfRangeException or ZstdSharp.ZstdException) { Fail($"{Path.GetFileName(file)}:{info.Name}", e); }
+            }
+        });
+        Parallel.ForEach(nodeFiles, file =>
+        {
+            try { Swtor.Formats.Gom.GomPrototypeFile.Parse(File.ReadAllBytes(file)); Interlocked.Increment(ref ok); }
+            catch (Exception e) when (e is GameFormatException or ArgumentException or IndexOutOfRangeException) { Fail(Path.GetFileName(file), e); }
+        });
+        Console.WriteLine($"decoded {ok}, failed {failed} in {sw.Elapsed}");
+        foreach (var (msg, (n, ex)) in errors.OrderByDescending(e => e.Value.Count).Take(25)) Console.WriteLine($"  {n} x {msg}  e.g. {ex}");
+        return failed == 0 ? 0 : 2;
+    }
+
+    if (args[1] == "schema")
+    {
+        var s = Swtor.Formats.Gom.GomSchema.Parse(File.ReadAllBytes(Path.Combine(gomRoot, "client.gom")));
+        Console.WriteLine($"{s.Enums.Count} enums, {s.Classes.Count} classes, {s.Fields.Count} fields");
+        return 0;
+    }
+
+    if (args.Length >= 3 && args[1] is "find" or "dump")
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var db = Swtor.Assets.GomDatabase.Open(DefaultRoot());
+        Console.WriteLine($"{db.Entries.Count} objects opened in {sw.Elapsed}");
+        if (args[1] == "find")
+        {
+            foreach (var e in db.Entries.Where(e => e.Name.Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(50))
+                Console.WriteLine($"{e.Name}  id 0x{e.Id:X}  class 0x{e.ClassId:X}");
+            return 0;
+        }
+        var entry = db.Find(args[2]);
+        if (entry is null) { Console.Error.WriteLine("Not found"); return 1; }
+        Console.WriteLine($"{entry.Name}  id 0x{entry.Id:X}  class 0x{entry.ClassId:X}");
+        PrintObject(db.Decode(entry).Object, 1, db.Schema);
+        return 0;
+    }
+    return 1;
+}
+
+// Prints an object. When the schema is known, enum values show their names.
+static void PrintObject(Swtor.Formats.Gom.GomObject obj, int indent, Swtor.Formats.Gom.GomSchema? schema = null)
+{
+    string pad = new(' ', indent * 2);
+    foreach (var f in obj.Fields)
+    {
+        var declared = schema is not null && schema.Fields.TryGetValue(f.Id, out var def) ? def.Type : null;
+        switch (f.Value)
+        {
+            case Swtor.Formats.Gom.GomObject inner:
+                Console.WriteLine($"{pad}0x{f.Id:X} ({f.Type}):");
+                PrintObject(inner, indent + 1, schema);
+                break;
+            case Swtor.Formats.Gom.GomList list:
+                Console.WriteLine($"{pad}0x{f.Id:X} ({f.Type}) list<{list.ItemType}> [{list.Items.Count}]");
+                foreach (var item in list.Items.Take(12))
+                {
+                    if (item is Swtor.Formats.Gom.GomObject io) { Console.WriteLine($"{pad}  -"); PrintObject(io, indent + 2, schema); }
+                    else Console.WriteLine($"{pad}  - {Format(item, declared?.Item, schema)}");
+                }
+                if (list.Items.Count > 12) Console.WriteLine($"{pad}  ... {list.Items.Count - 12} more");
+                break;
+            case Swtor.Formats.Gom.GomMap map:
+                Console.WriteLine($"{pad}0x{f.Id:X} ({f.Type}) map<{map.KeyType},{map.ValueType}> [{map.Entries.Count}]");
+                foreach (var e in map.Entries.Take(12))
+                    Console.WriteLine($"{pad}  {Format(e.Key, declared?.Item, schema)} => {(e.Value is Swtor.Formats.Gom.GomObject ? "{object}" : e.Value is Swtor.Formats.Gom.GomList l ? $"list[{l.Items.Count}]" : e.Value is Swtor.Formats.Gom.GomMap m ? $"map[{m.Entries.Count}]" : Format(e.Value, declared?.Value, schema))}");
+                break;
+            default:
+                Console.WriteLine($"{pad}0x{f.Id:X} ({f.Type}) = {Format(f.Value, declared, schema)}");
+                break;
+        }
+    }
+}
+
+static string Format(object? value, Swtor.Formats.Gom.GomTypeDescriptor? declared, Swtor.Formats.Gom.GomSchema? schema)
+{
+    if (value is Swtor.Formats.Gom.GomEnumValue e)
+    {
+        string? name = declared is { Type: Swtor.Formats.Gom.GomType.Enum } && schema is not null ? schema.EnumName(declared.ReferenceId, e.Value) : null;
+        return name is null ? $"enum {e.Value}" : $"{name} ({e.Value})";
+    }
+    return value?.ToString() ?? "null";
 }
