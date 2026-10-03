@@ -70,3 +70,10 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Colors (palettes, `ColorScheme` guids, skin tones) are in GOM data (`systemgenerated/*.node`, `.bkt`: zstd, custom format). Not read yet. Models show the untinted texture.
 - DDS: BC1/BC2/BC3 and uncompressed BGRA/BGRX cover 224,737 of 224,780 files. The rest are DX10 minimaps and broken files. No BC5/BC7 is used.
 - UV V is not flipped. Textures look correct as is.
+
+## Colors
+
+- Garment colors: material variant -> `ColorSchemeIds` (index.xml) -> `colorscheme/index.xml` (scheme per slot: primary and secondary palette ids) -> `garmenthue/*.xml` (Hue, Saturation, Brightness, Contrast). `ColorCatalog` reads them.
+- Mask texture (`PaletteMaskMap`, `_m`): red = primary area, green = secondary area. `PaletteTint` recolors on the CPU. **The real shader is unknown, so the result is an approximation.** Do not describe it as exact.
+- Skin, hair and eye color XML files are not in the extract (only index entries with a representative color). They need GOM data.
+- Run the viewer with a scheme: `dotnet run --project src/Swtor.App -- <file.gr2> <scheme guid>`.

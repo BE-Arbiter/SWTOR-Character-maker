@@ -2,8 +2,11 @@ using System.Xml;
 
 namespace Swtor.Formats.Xml;
 
-/// <summary>A material variant of an asset. <see cref="FileName"/> may contain the "[gen]" placeholder.</summary>
-public sealed record AssetMaterial(string Id, string Name, string FileName);
+/// <summary>
+/// A material variant of an asset. <see cref="FileName"/> may contain the "[gen]" placeholder.
+/// <see cref="ColorSchemeIds"/> lists the color schemes (see <see cref="ColorSchemeIndexReader"/>) allowed for this variant.
+/// </summary>
+public sealed record AssetMaterial(string Id, string Name, string FileName, IReadOnlyList<string> ColorSchemeIds);
 
 /// <summary>
 /// One entry of a slot <c>index.xml</c> (art/dynamic/&lt;slot&gt;/index.xml):
@@ -47,6 +50,7 @@ public static class AppearanceIndexReader
         string id = "", artName = "", baseFile = "";
         var attachments = new List<string>();
         var materials = new List<AssetMaterial>();
+        var schemeLists = new List<List<string>>();
         var bodytypes = new List<string>();
 
         // ReadElementContentAsString already moves to the next node, so Read() runs only when nothing was consumed.
@@ -70,8 +74,13 @@ public static class AppearanceIndexReader
                     xml.Read();
                     break;
                 case "Material":
-                    // The element also holds <ColorSchemes>. The loop skips them.
-                    materials.Add(new AssetMaterial(xml.GetAttribute("id") ?? "", xml.GetAttribute("name") ?? "", xml.GetAttribute("filename") ?? ""));
+                    schemeLists.Add([]);
+                    materials.Add(new AssetMaterial(xml.GetAttribute("id") ?? "", xml.GetAttribute("name") ?? "", xml.GetAttribute("filename") ?? "", schemeLists[^1]));
+                    xml.Read();
+                    break;
+                case "ColorScheme" when schemeLists.Count > 0:
+                    // These elements follow their <Material> start tag, so they belong to the last material.
+                    schemeLists[^1].Add(xml.GetAttribute("guid") ?? "");
                     xml.Read();
                     break;
                 default: xml.Read(); break;

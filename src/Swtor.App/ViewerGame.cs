@@ -49,6 +49,9 @@ public sealed class ViewerGame : Game
     private string? _error;
     private string? _pendingModel;
     private string? _pendingTexture;
+    private string? _pendingMask;
+    private DdsImage? _baseImage, _maskImage;
+    private string? _schemeId, _primaryPalette, _secondaryPalette;
     private string _textureQuery = "";
     private List<string> _textureResults = [];
 
@@ -56,7 +59,7 @@ public sealed class ViewerGame : Game
     private bool _popupOpen = true;
     private string _folderInput = "";
 
-    public ViewerGame(string? initialModel = null)
+    public ViewerGame(string? initialModel = null, string? initialScheme = null)
     {
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -69,9 +72,10 @@ public sealed class ViewerGame : Game
         Window.Title = "SWTOR Character Maker";
         _explorer.FileSelected += path => _pendingModel = path;
         _initialModel = initialModel;
+        _initialScheme = initialScheme;
     }
 
-    private string? _initialModel;
+    private string? _initialModel, _initialScheme;
 
     protected override void Initialize()
     {
@@ -111,11 +115,17 @@ public sealed class ViewerGame : Game
         {
             _pendingModel = null;
             LoadModel(model);
+            if (_initialScheme is not null && _matches.Count > 0)
+            {
+                SelectScheme(_initialScheme);
+                _initialScheme = null;
+            }
         }
         if (_pendingTexture is { } texture)
         {
             _pendingTexture = null;
-            ApplyTexture(texture.Length == 0 ? null : texture);
+            ApplyTexture(texture.Length == 0 ? null : texture, _pendingMask);
+            _pendingMask = null;
         }
         base.Update(gameTime);
     }
@@ -291,6 +301,7 @@ public sealed class ViewerGame : Game
     {
         ImGui.Separator();
         DrawAppearance();
+        DrawColors();
         ImGui.Text("Texture");
 
         ImGui.SetNextItemWidth(-1);
@@ -363,6 +374,8 @@ public sealed class ViewerGame : Game
     {
         _variantIndex = index;
         _pendingTexture = VariantTexture(_matches[_matchIndex], index) ?? "";
+        _pendingMask = VariantMask(_matches[_matchIndex], index);
+        _schemeId = null;
     }
 
     // Tries the variants of the current asset in order. Stops at the first one that has a texture file.
@@ -373,7 +386,7 @@ public sealed class ViewerGame : Game
         {
             if (VariantTexture(match, i) is not { } texture) continue;
             _variantIndex = i;
-            ApplyTexture(texture);
+            ApplyTexture(texture, VariantMask(match, i));
             return;
         }
         ApplyTexture(null);
@@ -403,6 +416,7 @@ public sealed class ViewerGame : Game
             _textureCandidates = _index.FindTextures(relative);
             _matches = _index.Appearances.Find(relative);
             _matchIndex = _variantIndex = 0;
+            _schemeId = _primaryPalette = _secondaryPalette = null;
             if (_matches.Count > 0) ApplyFirstUsableVariant();
             else ApplyTexture(_textureCandidates.Count > 0 ? _textureCandidates[0] : null);
         }
@@ -412,7 +426,30 @@ public sealed class ViewerGame : Game
         }
     }
 
-    private void ApplyTexture(string? relative)
+    // Loads the diffuse texture and its color mask (if any), then builds the GPU texture.
+    private void ApplyTexture(string? relative, string? maskRelative = null)
+    {
+        _baseImage = null;
+        _maskImage = null;
+        _texturePath = null;
+        if (relative is not null && _index is not null)
+        {
+            try
+            {
+                _baseImage = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(relative)));
+                _texturePath = relative;
+                if (maskRelative is not null) _maskImage = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(maskRelative)));
+            }
+            catch (Exception e) when (e is GameFormatException or IOException)
+            {
+                _error = $"{Path.GetFileName(relative)}: {e.Message}";
+            }
+        }
+        RebuildTexture();
+    }
+
+    // Applies the chosen palettes to the loaded images and uploads the result.
+    private void RebuildTexture()
     {
         _preview.Texture = null;
         if (_texture is not null)
@@ -421,20 +458,97 @@ public sealed class ViewerGame : Game
             _texture.Dispose();
             _texture = null;
         }
-        _texturePath = null;
-        if (relative is null || _index is null) return;
+        if (_baseImage is null || _index is null) return;
 
-        try
+        var colors = _index.Colors;
+        var primary = _primaryPalette is null ? null : colors.ReadPalette(_primaryPalette);
+        var secondary = _secondaryPalette is null ? null : colors.ReadPalette(_secondaryPalette);
+        var image = PaletteTint.Apply(_baseImage, _maskImage, primary, secondary);
+        _texture = TextureLoader.Create(GraphicsDevice, image);
+        _textureId = _gui.BindTexture(_texture);
+        _preview.Texture = _texture;
+    }
+
+    // Relative path of the palette mask of a variant, or null. The default black/white masks are ignored.
+    private string? VariantMask(AppearanceMatch match, int variant)
+    {
+        if (_index is null) return null;
+        var material = _index.Appearances.ReadMaterial(match.Asset.Materials[variant], match.Gender);
+        string? mask = material?.TexturePath("PaletteMaskMap");
+        if (mask is null || mask.StartsWith("art/defaultassets", StringComparison.OrdinalIgnoreCase)) return null;
+        string path = mask + ".dds";
+        return File.Exists(_index.FullPath(path)) ? path : null;
+    }
+
+    // Color schemes that suit the current material variant, plus manual palette pickers.
+    private void DrawColors()
+    {
+        if (_index is null || _matches.Count == 0) return;
+        var match = _matches[_matchIndex];
+        var variants = match.Asset.Materials;
+        if (variants.Count == 0) return;
+        var colors = _index.Colors;
+
+        ImGui.Text("Colors (approximate)");
+        if (_maskImage is null)
         {
-            var image = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(relative)));
-            _texture = TextureLoader.Create(GraphicsDevice, image);
-            _textureId = _gui.BindTexture(_texture);
-            _preview.Texture = _texture;
-            _texturePath = relative;
+            ImGui.TextDisabled("This material has no color mask. Colors would have no effect.");
+            return;
         }
-        catch (Exception e) when (e is GameFormatException or IOException)
+
+        var schemeIds = variants[_variantIndex].ColorSchemeIds;
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo("##scheme", SchemeLabel(_schemeId)))
         {
-            _error = $"{Path.GetFileName(relative)}: {e.Message}";
+            if (ImGui.Selectable("(none)", _schemeId is null)) SelectScheme(null);
+            foreach (var id in schemeIds)
+            {
+                var scheme = colors.FindScheme(id);
+                if (scheme is not null && ImGui.Selectable($"{scheme.Name}##s{id}", id == _schemeId)) SelectScheme(id);
+            }
+            ImGui.EndCombo();
         }
+
+        DrawPaletteCombo("Primary", "##primary", ref _primaryPalette);
+        DrawPaletteCombo("Secondary", "##secondary", ref _secondaryPalette);
+    }
+
+    private string SchemeLabel(string? id) =>
+        id is null ? "(no color scheme)" : _index?.Colors.FindScheme(id)?.Name ?? id;
+
+    private void DrawPaletteCombo(string label, string id, ref string? selected)
+    {
+        var colors = _index!.Colors;
+        ImGui.SetNextItemWidth(-60);
+        if (ImGui.BeginCombo(id, selected is null ? "(none)" : colors.FindPaletteEntry(selected)?.Name ?? selected))
+        {
+            if (ImGui.Selectable("(none)", selected is null)) { selected = null; RebuildTexture(); }
+            foreach (var palette in colors.Palettes)
+            {
+                if (!ImGui.Selectable($"{palette.Name}##{id}{palette.Id}", palette.Id == selected)) continue;
+                selected = palette.Id;
+                _schemeId = null;
+                RebuildTexture();
+            }
+            ImGui.EndCombo();
+        }
+        ImGui.SameLine();
+        ImGui.Text(label);
+    }
+
+    // Takes the two palettes that the scheme gives for the slot of the current model.
+    private void SelectScheme(string? id)
+    {
+        _schemeId = id;
+        if (id is null)
+        {
+            _primaryPalette = _secondaryPalette = null;
+        }
+        else if (_index!.Colors.FindScheme(id) is { } scheme && scheme.Slots.TryGetValue(_matches[_matchIndex].Slot, out var palettes))
+        {
+            _primaryPalette = palettes.Primary;
+            _secondaryPalette = palettes.Secondary;
+        }
+        RebuildTexture();
     }
 }

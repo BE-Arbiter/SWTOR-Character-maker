@@ -21,6 +21,11 @@ public sealed class AssetIndex
     /// <summary>Model-to-material links from the slot index.xml files. Built on first use (about a second). Call from a background thread first.</summary>
     public AppearanceCatalog Appearances => _appearances.Value;
 
+    private readonly Lazy<ColorCatalog> _colors;
+
+    /// <summary>Color schemes and garment palettes. Built on first use.</summary>
+    public ColorCatalog Colors => _colors.Value;
+
     private readonly Dictionary<string, List<string>> _texturesByPrefix;
 
     private AssetIndex(string root, List<string> models, List<string> textures)
@@ -29,6 +34,7 @@ public sealed class AssetIndex
         models.Sort(StringComparer.OrdinalIgnoreCase);
         textures.Sort(StringComparer.OrdinalIgnoreCase);
         _appearances = new Lazy<AppearanceCatalog>(() => new AppearanceCatalog(root));
+        _colors = new Lazy<ColorCatalog>(() => new ColorCatalog(root));
         Models = models;
         Textures = textures;
 
