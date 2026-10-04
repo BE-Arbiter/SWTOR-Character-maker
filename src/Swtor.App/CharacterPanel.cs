@@ -82,7 +82,7 @@ public sealed partial class CharacterPanel
 
         string? headName = OptionFor(AppearanceSlot.Head) is { } head ? _index.Appearances.FindAsset(head.AssetId)?.Asset.ArtName : null;
         AddBodyAndEquipment(gender, headPart?.Bodytype, headName);
-        _preview.Frame();
+        _preview.Frame(this);
     }
 
     public void Draw()

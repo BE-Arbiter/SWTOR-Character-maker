@@ -102,6 +102,25 @@ public sealed class ModelPreview : IDisposable
         _boundsMax = max;
     }
 
+    private object? _frameOwner;
+
+    /// <summary>
+    /// Like <see cref="Frame()"/>, but keeps the camera when the same <paramref name="owner"/> framed the previous scene.
+    /// Use it when a panel rebuilds its scene after each change, so the view does not jump.
+    /// </summary>
+    public void Frame(object owner)
+    {
+        if (_meshes.Count == 0) return;
+        if (!ReferenceEquals(_frameOwner, owner))
+        {
+            Frame();
+            _frameOwner = owner;
+            return;
+        }
+        // Keep target, distance and angles. Only the grid follows the new bounds.
+        BuildGrid(_boundsMin.Y);
+    }
+
     /// <summary>Points the camera at the whole scene and moves the grid to its floor.</summary>
     public void Frame()
     {
@@ -109,6 +128,7 @@ public sealed class ModelPreview : IDisposable
         _target = (_boundsMin + _boundsMax) / 2f;
         _radius = Math.Max(Vector3.Distance(_boundsMin, _boundsMax) / 2f, 0.01f);
         _distance = _radius * 2.6f;
+        _frameOwner = null;
         BuildGrid(_boundsMin.Y);
     }
 
