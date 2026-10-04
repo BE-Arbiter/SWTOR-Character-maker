@@ -11,11 +11,13 @@ public sealed partial class CharacterPanel
     private enum EquipSort { Name, ArtName, Level, Quality }
 
     // One asset in an equipment list with the items that show it (best first).
-    private sealed record EquipEntry(AppearanceAsset Asset, IReadOnlyList<ItemInfo> Items, string SearchText);
+    private sealed record EquipEntry(AppearanceAsset Asset, IReadOnlyList<ItemInfo> Items, string SearchText, ArmorInfo Armor);
 
     private readonly Dictionary<(string Slot, string? Bodytype, EquipSort Sort), List<EquipEntry>> _equipOptions = [];
     private EquipSort _equipSort = EquipSort.Name;
     private ItemCatalog? _items;
+    private ArmorWeight _weightFilter = ArmorWeight.Unknown; // Unknown means all weights.
+    private string? _classFilter;                           // Null means all classes.
 
     /// <summary>Gives the panel the item names. Until then the lists show art names only.</summary>
     public void SetItems(ItemCatalog items)
@@ -36,6 +38,7 @@ public sealed partial class CharacterPanel
                 if (ImGui.Selectable(SortLabel(mode), mode == _equipSort)) _equipSort = mode;
             ImGui.EndCombo();
         }
+        DrawArmorFilters();
         if (_items is null) ImGui.TextDisabled("Item names are loading...");
 
         foreach (string slot in EquipSlots)
@@ -46,11 +49,38 @@ public sealed partial class CharacterPanel
         }
     }
 
+    // Weight and class filters. They apply to every slot. The weight and the class come from the art name (see ArmorInfo).
+    private void DrawArmorFilters()
+    {
+        ImGui.SetNextItemWidth(110);
+        if (ImGui.BeginCombo("##weight", _weightFilter == ArmorWeight.Unknown ? "All weights" : _weightFilter.ToString()))
+        {
+            if (ImGui.Selectable("All weights", _weightFilter == ArmorWeight.Unknown)) _weightFilter = ArmorWeight.Unknown;
+            foreach (var weight in new[] { ArmorWeight.Light, ArmorWeight.Medium, ArmorWeight.Heavy })
+                if (ImGui.Selectable(weight.ToString(), weight == _weightFilter)) _weightFilter = weight;
+            ImGui.EndCombo();
+        }
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo("##armorclass", _classFilter is null ? "All classes" : ArmorInfo.Classes[_classFilter]))
+        {
+            if (ImGui.Selectable("All classes", _classFilter is null)) _classFilter = null;
+            foreach (var (code, name) in ArmorInfo.Classes)
+                if (ImGui.Selectable(name, code == _classFilter)) _classFilter = code;
+            ImGui.EndCombo();
+        }
+    }
+
+    private bool PassesArmorFilters(EquipEntry entry) =>
+        (_weightFilter == ArmorWeight.Unknown || entry.Armor.Weight == _weightFilter)
+        && (_classFilter is null || entry.Armor.ClassCode == _classFilter);
+
     private void DrawEquipSlot(string slot)
     {
         _equipment.TryGetValue(slot, out var choice);
         var options = EquipOptions(slot);
-        ImGui.TextDisabled($"{slot} ({options.Count})");
+        bool filtered = _weightFilter != ArmorWeight.Unknown || _classFilter is not null;
+        ImGui.TextDisabled(filtered ? $"{slot} ({options.Count(PassesArmorFilters)} of {options.Count})" : $"{slot} ({options.Count})");
 
         _equipFilter.TryGetValue(slot, out string? filter);
         filter ??= "";
@@ -70,6 +100,7 @@ public sealed partial class CharacterPanel
             foreach (var entry in options)
             {
                 if (filter.Length > 0 && !entry.SearchText.Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!PassesArmorFilters(entry)) continue;
                 if (++listed > MaxListed)
                 {
                     ImGui.TextDisabled("... use the filter");
@@ -167,7 +198,7 @@ public sealed partial class CharacterPanel
     {
         var items = _items?.ForAsset(long.Parse(asset.Id, CultureInfo.InvariantCulture)) ?? [];
         string search = asset.ArtName + " " + string.Join(' ', items.Select(i => i.Name));
-        return new EquipEntry(asset, items, search);
+        return new EquipEntry(asset, items, search, ArmorInfo.Parse(asset.ArtName));
     }
 
     // Item name with the number of other items, then the art name. Just the art name when no item shows the asset.

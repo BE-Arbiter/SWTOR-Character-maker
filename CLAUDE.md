@@ -145,3 +145,8 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 ## Rendering test option
 
 - `SWTOR_SHOT=<file.png>` saves the viewer window to a PNG after about 500 frames with a model shown, then quits. `SWTOR_CAM=yaw,pitch,distance,x,y,z` sets the camera first. Units are small: a head is about 0.02 wide, the eyes are at y of about 0.19 to 0.20, a close-up distance is 0.012. Example: `SWTOR_SHOT=a.png SWTOR_CAM=0.1,0,0.012,0,0.1965,0.005 dotnet run --project src/Swtor.App -- --character --load chiss.json`. A save with empty `options` gives the default look of a spec. Use it to check the look of a change instead of driving the desktop.
+
+## Armor weight and class
+
+- An armor art name is `<slot>_<style>_<weight>_<class>_<number>`: weight is `light`, `med` or `heavy`; class is `ge` (generic) or `bh`, `tr`, `sw`, `ss` (Sith Inquisitor), `sm`, `sp` (Imperial Agent), `jk`, `jw` (Jedi Consular). `ArmorInfo.Parse` reads them. The codes were checked against French item names.
+- The equipment lists have a weight filter and a class filter (all slots). Adaptive armor is not in the art names. Item objects only show a crafting profession such as `prfProfessionArmormechAdaptive`, so it is not offered.
