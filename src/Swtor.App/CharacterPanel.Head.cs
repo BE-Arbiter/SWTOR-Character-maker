@@ -15,7 +15,7 @@ public sealed partial class CharacterPanel
     private void AddHead(ResolvedPart part)
     {
         var pieces = new Dictionary<int, Texture2D>();
-        if (part.Overrides is not null && part.Overrides.TryGetValue(EyeMaterialIndex, out var eyes)
+        if (FindEyeOverride(part) is { } eyes
             && LoadTexture(eyes.DiffusePath, eyes.MaskPath, EyeTint(), null, null, GlowingEye(eyes)) is { } eyeTexture)
         {
             pieces[EyeMaterialIndex] = eyeTexture;
@@ -32,6 +32,13 @@ public sealed partial class CharacterPanel
             _error = $"Head: {e.Message}";
         }
     }
+
+    // The eye override has index 1 for some heads and -1 for most (-1 means "the eye material"). Both go on mesh slot 1.
+    private static ResolvedMaterial? FindEyeOverride(ResolvedPart part) =>
+        part.Overrides is null ? null
+        : part.Overrides.TryGetValue(EyeMaterialIndex, out var eyes) ? eyes
+        : part.Overrides.TryGetValue(-1, out var derived) ? derived
+        : null;
 
     // An eye without a color mask (Chiss) is a glow: a dark red halo in the file, drawn bright in the game.
     // Without an eye color option the texture is brightened.

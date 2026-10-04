@@ -209,6 +209,7 @@ public sealed partial class ViewerGame : Game
         DrawOpenFolderDialog();
         DrawCharacterFileDialogs();
         _gui.AfterLayout();
+        CaptureForTest();
         base.Draw(gameTime);
     }
 

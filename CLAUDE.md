@@ -117,7 +117,7 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 
 - Skin: the head diffuse already has a light skin color. `ImageColor.MatchAverage` moves the average of the masked area (red channel of `PaletteMaskMap`) to the representative skin color and keeps the detail. Lips and teeth are outside the mask. Body parts and hair use the same function.
 - Complexion (eyebrows, blush) multiplies the skin texture. Face paint is drawn over it with its alpha. These option assets name a `.dds` file as their base file (`PartResolver.OverlayPath`). The age overlay is not applied yet.
-- Eyes: a head material has `MaterialOverride index="1"` that gives the eye material. Mesh slot 1 of the head is the eye. The iris is the red area of its mask and gets the eye color.
+- Eyes: a head material has a `MaterialOverride` that gives the eye material. Its `index` is `1` for 1,464 materials and `-1` ("the eye") for 2,481. Both go on mesh slot 1 of the head (`FindEyeOverride`). Before this fix the `-1` heads had no eye texture. The iris is the red area of its mask and gets the eye color.
 - All of this approximates the game shader. Layout of the window: 18% models, 57% preview, 25% details.
 
 ## Weapons
@@ -141,3 +141,7 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 
 - `ModelPreview` uses `BasicEffect` with default lighting. Its specular color is set to zero: the default white highlight made every texture look shiny. Game specular and gloss maps (`_s`, `GlossMap`) are not used yet.
 - Chiss have no `EyeColor` option in their `pcs` spec. Their eye material has a black `PaletteMaskMap` and a dark red glow diffuse. `ImageColor.NormalizeBrightness` brightens it (only if the brightest value is below 170) so the red halo shows. The `palette1`/`palette2` vectors in a `.mat` file are not read yet.
+
+## Rendering test option
+
+- `SWTOR_SHOT=<file.png>` saves the viewer window to a PNG after about 500 frames with a model shown, then quits. `SWTOR_CAM=yaw,pitch,distance,x,y,z` sets the camera first. Units are small: a head is about 0.02 wide, the eyes are at y of about 0.19 to 0.20, a close-up distance is 0.012. Example: `SWTOR_SHOT=a.png SWTOR_CAM=0.1,0,0.012,0,0.1965,0.005 dotnet run --project src/Swtor.App -- --character --load chiss.json`. A save with empty `options` gives the default look of a spec. Use it to check the look of a change instead of driving the desktop.

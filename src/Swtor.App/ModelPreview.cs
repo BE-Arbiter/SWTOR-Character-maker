@@ -173,6 +173,15 @@ public sealed class ModelPreview : IDisposable
         if (wheel != 0) _distance = Math.Max(_radius * 0.05f, _distance * MathF.Pow(0.9f, wheel / 120f));
     }
 
+    /// <summary>Sets the camera by hand (used by the SWTOR_CAM test option). Angles are in radians.</summary>
+    public void SetCamera(float yaw, float pitch, float distance, Vector3 target)
+    {
+        _yaw = yaw;
+        _pitch = pitch;
+        _distance = distance;
+        _target = target;
+    }
+
     public void ResetCamera()
     {
         _yaw = 0.6f;
