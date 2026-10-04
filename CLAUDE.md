@@ -136,3 +136,8 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 
 - An item (`itm.*`) whose appearance string is not an `ipp.*` object holds a key of `itmAppearanceDatatable`. `ItemCatalog.ForWeaponKey` returns these items. 1,175 of 2,368 weapon appearances have a named item. The others are store (`mtx`), NPC or color variants that no item uses.
 - The weapons list shows `item name (+N)  [key]`, can be sorted by item name, and the filter searches item names and keys.
+
+## Shading notes
+
+- `ModelPreview` uses `BasicEffect` with default lighting. Its specular color is set to zero: the default white highlight made every texture look shiny. Game specular and gloss maps (`_s`, `GlossMap`) are not used yet.
+- Chiss have no `EyeColor` option in their `pcs` spec. Their eye material (`eye_chiss_non_a01_c01.mat`) has a black `PaletteMaskMap` and a dark red glow diffuse, so nothing is tinted. The `palette1`/`palette2` vectors in a `.mat` file (default colors of the material) are not read yet.

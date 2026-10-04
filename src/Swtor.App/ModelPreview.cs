@@ -55,6 +55,8 @@ public sealed class ModelPreview : IDisposable
         _device = device;
         _surface = new BasicEffect(device) { PreferPerPixelLighting = true };
         _surface.EnableDefaultLighting();
+        // Default lighting adds a white specular highlight. The game textures are matte without a specular map, so remove it.
+        _surface.SpecularColor = Vector3.Zero;
         _lines = new BasicEffect(device) { VertexColorEnabled = true, LightingEnabled = false };
     }
 
