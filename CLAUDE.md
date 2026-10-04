@@ -140,4 +140,4 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 ## Shading notes
 
 - `ModelPreview` uses `BasicEffect` with default lighting. Its specular color is set to zero: the default white highlight made every texture look shiny. Game specular and gloss maps (`_s`, `GlossMap`) are not used yet.
-- Chiss have no `EyeColor` option in their `pcs` spec. Their eye material (`eye_chiss_non_a01_c01.mat`) has a black `PaletteMaskMap` and a dark red glow diffuse, so nothing is tinted. The `palette1`/`palette2` vectors in a `.mat` file (default colors of the material) are not read yet.
+- Chiss have no `EyeColor` option in their `pcs` spec. Their eye material has a black `PaletteMaskMap` and a dark red glow diffuse. `ImageColor.NormalizeBrightness` brightens it (only if the brightest value is below 170) so the red halo shows. The `palette1`/`palette2` vectors in a `.mat` file are not read yet.

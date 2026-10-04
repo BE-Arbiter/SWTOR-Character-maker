@@ -46,6 +46,23 @@ public static class ImageColor
         return new DdsImage(image.Width, image.Height, result);
     }
 
+    /// <summary>
+    /// Scales all pixels so the brightest channel value becomes 255, but only if the image is dark (brightest value below 170).
+    /// Normal textures stay unchanged. Used for glowing textures (Chiss eyes) that the game
+    /// draws unlit and very bright, while the file holds a dark image. Returns a new image.
+    /// </summary>
+    public static DdsImage NormalizeBrightness(DdsImage image)
+    {
+        int max = 1;
+        for (int i = 0; i < image.Rgba.Length; i += 4)
+            max = Math.Max(max, Math.Max(image.Rgba[i], Math.Max(image.Rgba[i + 1], image.Rgba[i + 2])));
+        if (max >= 170) return image;
+        var result = (byte[])image.Rgba.Clone();
+        for (int i = 0; i < result.Length; i += 4)
+            for (int c = 0; c < 3; c++) result[i + c] = (byte)Math.Min(255, result[i + c] * 255 / max);
+        return new DdsImage(image.Width, image.Height, result);
+    }
+
     /// <summary>Multiplies the color of <paramref name="image"/> by an overlay (white keeps the pixel). Returns a new image.</summary>
     public static DdsImage Multiply(DdsImage image, DdsImage overlay)
     {

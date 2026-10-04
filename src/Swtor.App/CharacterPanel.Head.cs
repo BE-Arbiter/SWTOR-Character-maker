@@ -16,7 +16,7 @@ public sealed partial class CharacterPanel
     {
         var pieces = new Dictionary<int, Texture2D>();
         if (part.Overrides is not null && part.Overrides.TryGetValue(EyeMaterialIndex, out var eyes)
-            && LoadTexture(eyes.DiffusePath, eyes.MaskPath, EyeTint(), null, null, null) is { } eyeTexture)
+            && LoadTexture(eyes.DiffusePath, eyes.MaskPath, EyeTint(), null, null, GlowingEye(eyes)) is { } eyeTexture)
         {
             pieces[EyeMaterialIndex] = eyeTexture;
         }
@@ -32,6 +32,11 @@ public sealed partial class CharacterPanel
             _error = $"Head: {e.Message}";
         }
     }
+
+    // An eye without a color mask (Chiss) is a glow: a dark red halo in the file, drawn bright in the game.
+    // Without an eye color option the texture is brightened.
+    private Func<DdsImage, DdsImage>? GlowingEye(ResolvedMaterial eyes) =>
+        eyes.MaskPath is null && EyeTint() is null ? ImageColor.NormalizeBrightness : null;
 
     // Complexion (eyebrows, blush) multiplies the skin. Face paint is drawn over it with its alpha.
     private DdsImage AddFaceOverlays(DdsImage skin, string? bodytype)
