@@ -131,3 +131,8 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Item names are in `fr-fr/str/itm.stb` (only French is in the extract; `TextTables.Find` picks the first language folder that has the table). `StringTable` reads the format: 3 header bytes, `i32` count, 26 bytes per entry, then the texts. An item's name field is a reference `str.itm#<id>`.
 - `ItemCatalog` links items to art: item (`itm.*`) -> appearance object name (`ipp.*`) -> (slot, asset id, material id). 46,812 items have a name and an appearance. One asset is shown by many items, sorted from the lowest level: the first one is the item that introduced the look, so its name is used as the label.
 - The equipment lists show `item name (+N) [art name]`, can be sorted by item name, art name, item level or quality, and the filter searches all item names of an asset. Building the catalog takes about 4 s on the background thread that opens the game database.
+
+## Weapon item names
+
+- An item (`itm.*`) whose appearance string is not an `ipp.*` object holds a key of `itmAppearanceDatatable`. `ItemCatalog.ForWeaponKey` returns these items. 1,175 of 2,368 weapon appearances have a named item. The others are store (`mtx`), NPC or color variants that no item uses.
+- The weapons list shows `item name (+N)  [key]`, can be sorted by item name, and the filter searches item names and keys.

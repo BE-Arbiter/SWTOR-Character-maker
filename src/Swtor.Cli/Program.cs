@@ -23,6 +23,8 @@ if (args.Length >= 1 && args[0] == "items")
     var itemNames = Swtor.Formats.Stb.StringTable.Parse(File.ReadAllBytes(stbPath));
     var catalog = Swtor.Assets.ItemCatalog.Load(itemDb, itemNames);
     Console.WriteLine($"{itemNames.Count} texts, {catalog.Count} items with an appearance in {sw.Elapsed}");
+    var weaponCatalog = Swtor.Assets.WeaponCatalog.Load(itemDb);
+    Console.WriteLine($"{weaponCatalog.Items.Count(w => catalog.ForWeaponKey(w.Key).Count > 0)} of {weaponCatalog.Items.Count} weapons have an item name");
     var itemIndex = Swtor.Assets.AssetIndex.Load(DefaultRoot());
     foreach (string artName in new[] { "chest_armor01_heavy_bh_a02", "leg_armor01_heavy_bh_a02" })
         if (itemIndex.Appearances.AssetsOfSlot(artName.Split('_')[0]).FirstOrDefault(a => a.ArtName == artName) is { } asset)

@@ -20,6 +20,8 @@ public sealed class WeaponPanel
 
     private AssetIndex? _index;
     private WeaponCatalog? _catalog;
+    private ItemCatalog? _items;
+    private bool _sortByName = true, _lastSortByName = true;
     private List<WeaponAppearance> _shown = [];
     private string _filter = "", _lastFilter = "\0";
     private string _type = "";
@@ -45,6 +47,13 @@ public sealed class WeaponPanel
             _pendingKey = null;
             Rebuild();
         }
+    }
+
+    /// <summary>Gives the item names. They arrive after the weapon table, so the list is rebuilt.</summary>
+    public void SetItems(ItemCatalog items)
+    {
+        _items = items;
+        _lastFilter = "\0";
     }
 
     private string? _pendingKey;
@@ -113,14 +122,33 @@ public sealed class WeaponPanel
             ImGui.EndCombo();
         }
         ImGui.SetNextItemWidth(-1);
-        ImGui.InputTextWithHint("##weaponfilter", "Filter by name...", ref _filter, 128);
+        ImGui.InputTextWithHint("##weaponfilter", "Filter by item name or key...", ref _filter, 128);
+        ImGui.Checkbox("Sort by item name", ref _sortByName);
 
-        if (_filter == _lastFilter && _type == _lastType) return;
+        if (_filter == _lastFilter && _type == _lastType && _sortByName == _lastSortByName) return;
         _lastFilter = _filter;
         _lastType = _type;
-        _shown = _catalog.Items
-            .Where(i => (_type.Length == 0 || i.CombatType == _type) && (_filter.Length == 0 || i.Key.Contains(_filter, StringComparison.OrdinalIgnoreCase)))
+        _lastSortByName = _sortByName;
+        var shown = _catalog.Items
+            .Where(i => (_type.Length == 0 || i.CombatType == _type) && (_filter.Length == 0 || Matches(i)))
             .ToList();
+        // Weapons without a named item go last when sorting by name.
+        if (_sortByName)
+            shown = [.. shown.OrderBy(i => ItemsOf(i).Count == 0).ThenBy(i => Label(i), StringComparer.OrdinalIgnoreCase)];
+        _shown = shown;
+    }
+
+    private IReadOnlyList<ItemInfo> ItemsOf(WeaponAppearance weapon) => _items?.ForWeaponKey(weapon.Key) ?? [];
+
+    private bool Matches(WeaponAppearance weapon) =>
+        weapon.Key.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+        || ItemsOf(weapon).Any(i => i.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    // "Item name (+N)  [key]". The first item has the lowest level, so it introduced the look.
+    private string Label(WeaponAppearance weapon)
+    {
+        var items = ItemsOf(weapon);
+        return items.Count == 0 ? weapon.Key : $"{items[0].Name}{(items.Count > 1 ? $" (+{items.Count - 1})" : "")}  [{weapon.Key}]";
     }
 
     // The list is drawn by hand, so only the rows in view cost time (2,368 weapons).
@@ -135,7 +163,7 @@ public sealed class WeaponPanel
         {
             ImGui.SetCursorPos(new Vector2(ImGui.GetStyle().WindowPadding.X, top + i * rowHeight));
             var weapon = _shown[i];
-            if (!ImGui.Selectable($"{weapon.Key}##{i}", weapon == _selected)) continue;
+            if (!ImGui.Selectable($"{Label(weapon)}##{i}", weapon == _selected)) continue;
             _selected = weapon;
             Rebuild();
         }
@@ -153,11 +181,20 @@ public sealed class WeaponPanel
         }
         if (_error is not null) ImGui.TextColored(new Vector4(1, 0.5f, 0.4f, 1), _error);
         ImGui.Separator();
-        ImGui.TextWrapped(_selected.Key);
+        var items = ItemsOf(_selected);
+        ImGui.TextWrapped(items.Count > 0 ? items[0].Name : _selected.Key);
+        if (items.Count > 0) ImGui.TextDisabled(_selected.Key);
         ImGui.Text($"Type: {TypeLabel(_selected.CombatType)}");
         if (_selected.Label.Length > 0) ImGui.Text($"Label: {_selected.Label}");
         if (_selected.Socket.Length > 0) ImGui.Text($"Socket: {_selected.Socket}");
         if (_selected.Color.Length > 0) ImGui.Text($"Color: {_selected.Color}");
+        if (items.Count > 0)
+        {
+            ImGui.Text($"Items ({items.Count}):");
+            foreach (var item in items.Take(10))
+                ImGui.TextWrapped($"  {item.Name}  (level {item.Level}, {item.QualityName.Replace("itmQuality", "")})");
+            if (items.Count > 10) ImGui.TextDisabled($"  ... and {items.Count - 10} more");
+        }
         ImGui.TextWrapped($"Model: {_selected.ModelPath}");
         if (_triangles > 0) ImGui.Text($"{_triangles} triangles");
         ImGui.TextWrapped(_texturePath is null ? "No texture found in the extracted data." : $"Texture: {_texturePath}");

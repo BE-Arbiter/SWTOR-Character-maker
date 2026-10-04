@@ -155,6 +155,7 @@ public sealed partial class ViewerGame : Game
         {
             _readyItems = null;
             _character.SetItems(itemCatalog);
+            _weapons.SetItems(itemCatalog);
         }
         if (_readyWeapons is { } weaponCatalog)
         {

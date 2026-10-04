@@ -32,13 +32,24 @@ public sealed class ItemCatalog
 
     public int Count { get; }
 
-    private ItemCatalog(List<ItemInfo> items)
+    private readonly Dictionary<string, List<ItemInfo>> _byWeaponKey;
+
+    private ItemCatalog(List<ItemInfo> items, List<(string Key, ItemInfo Item)> weaponItems)
     {
         Count = items.Count;
-        _byAsset = items.GroupBy(i => i.AssetId).ToDictionary(
-            g => g.Key,
-            g => g.OrderBy(i => i.Level).ThenByDescending(i => i.Quality).ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList());
+        _byAsset = items.GroupBy(i => i.AssetId).ToDictionary(g => g.Key, g => Sorted(g));
+        _byWeaponKey = weaponItems.GroupBy(w => w.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => Sorted(g.Select(w => w.Item)), StringComparer.OrdinalIgnoreCase);
     }
+
+    private static List<ItemInfo> Sorted(IEnumerable<ItemInfo> items) =>
+        items.OrderBy(i => i.Level).ThenByDescending(i => i.Quality).ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>
+    /// Items that show the weapon appearance with this key (a key of the weapon table), lowest level first. Empty if none.
+    /// The items have no art asset: <see cref="ItemInfo.AssetId"/> is 0.
+    /// </summary>
+    public IReadOnlyList<ItemInfo> ForWeaponKey(string key) => _byWeaponKey.TryGetValue(key, out var list) ? list : [];
 
     /// <summary>
     /// Items that show this art asset, lowest level first (then best quality). The first item is the one that introduced the look,
@@ -63,20 +74,24 @@ public sealed class ItemCatalog
         database.Schema.Fields.TryGetValue(QualityField, out var qualityField);
         ulong qualityEnum = qualityField?.Type?.ReferenceId ?? 0;
         var items = new ConcurrentBag<ItemInfo>();
+        var weaponItems = new ConcurrentBag<(string Key, ItemInfo Item)>();
         database.ForEachNode(e => e.Name.StartsWith("itm.", StringComparison.Ordinal), (entry, node) =>
         {
             var o = node.Object;
-            if (o.Find(AppearanceRefField)?.Value is not string appearanceName
-                || !appearances.TryGetValue(appearanceName, out var appearance)) return;
+            if (o.Find(AppearanceRefField)?.Value is not string appearanceName) return;
             if (o.Find(NameField)?.Value is not string reference || names.GetByReference(reference) is not { } name) return;
 
             int quality = o.Find(QualityField)?.Value is GomEnumValue q ? q.Value : 0;
             string qualityName = database.Schema.EnumName(qualityEnum, quality) ?? "";
             int level = o.Find(LevelField)?.Value is long l ? (int)l : 0;
-            items.Add(new ItemInfo(entry.Name, name, level, quality, qualityName,
-                (AppearanceSlot)appearance.Slot, appearance.Asset, appearance.Material));
+            if (appearances.TryGetValue(appearanceName, out var appearance))
+                items.Add(new ItemInfo(entry.Name, name, level, quality, qualityName,
+                    (AppearanceSlot)appearance.Slot, appearance.Asset, appearance.Material));
+            else
+                // Not an "ipp.*" object: the string is a key of the weapon table.
+                weaponItems.Add((appearanceName, new ItemInfo(entry.Name, name, level, quality, qualityName, 0, 0, 0)));
         });
-        return new ItemCatalog([.. items]);
+        return new ItemCatalog([.. items], [.. weaponItems]);
     }
 }
 
