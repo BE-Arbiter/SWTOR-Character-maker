@@ -5,8 +5,11 @@ namespace Swtor.Assets;
 /// <summary>A creator choice saved as ids from the game data (not as list positions), so it survives updates of the option lists.</summary>
 public sealed record SavedOption(long AssetId, long MaterialId);
 
-/// <summary>An equipped asset: asset id, material id (null for the first material) and the color scheme guid (null for default colors).</summary>
-public sealed record SavedEquipment(string AssetId, string? MaterialId, string? SchemeId);
+/// <summary>
+/// An equipped asset: asset id, material id (null for the first material) and the color scheme guid (null for default colors).
+/// <paramref name="PrimaryId"/> and <paramref name="SecondaryId"/> are palette asset ids chosen by hand. They replace the palettes of the scheme. Null keeps the scheme.
+/// </summary>
+public sealed record SavedEquipment(string AssetId, string? MaterialId, string? SchemeId, string? PrimaryId = null, string? SecondaryId = null);
 
 /// <summary>
 /// A saved character. Stored as indented JSON. <see cref="Options"/> is keyed by <see cref="AppearanceSlot"/> name

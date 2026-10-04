@@ -119,6 +119,7 @@ public sealed partial class CharacterPanel
         if (choice is null) return;
         DrawVariantChoice(choice);
         DrawSchemeChoice(slot, choice);
+        DrawDyeChoice(choice);
     }
 
     private void DrawVariantChoice(EquipChoice choice)
@@ -146,6 +147,78 @@ public sealed partial class CharacterPanel
         return item is null ? file : $"{file} - {item.Name}";
     }
 
+    private readonly Dictionary<string, System.Numerics.Vector4> _swatches = [];
+
+    // Free choice of the two colors of an item, like the dye modules of the game. The palettes are the garment palettes of the game.
+    private void DrawDyeChoice(EquipChoice choice)
+    {
+        if (_index is null) return;
+        if (!choice.HasMask)
+        {
+            ImGui.TextDisabled("This item has no color mask.");
+            return;
+        }
+        string? primary = choice.PrimaryId, secondary = choice.SecondaryId;
+        bool changed = DrawPalettePicker("Primary", ref primary) | DrawPalettePicker("Secondary", ref secondary);
+        if (!changed) return;
+        choice.PrimaryId = primary;
+        choice.SecondaryId = secondary;
+        Rebuild();
+    }
+
+    // A swatch button that opens a grid of all palettes. Returns true when the choice changed. A null id means "from the scheme".
+    private bool DrawPalettePicker(string label, ref string? id)
+    {
+        var colors = _index!.Colors;
+        string popup = "##palette" + label;
+        string current = id is null ? "(scheme)" : colors.FindPaletteEntry(id)?.Name ?? id;
+
+        ImGui.AlignTextToFramePadding();
+        ImGui.Text(label);
+        ImGui.SameLine(80);
+        if (id is not null) ImGui.ColorButton("##current" + label, Swatch(id), 0, new System.Numerics.Vector2(20, 20));
+        else ImGui.Dummy(new System.Numerics.Vector2(20, 20));
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.Button($"{current}##open{label}", new System.Numerics.Vector2(-1, 0))) ImGui.OpenPopup(popup);
+
+        bool changed = false;
+        if (!ImGui.BeginPopup(popup)) return false;
+        if (ImGui.Selectable("(from scheme)", id is null))
+        {
+            id = null;
+            changed = true;
+        }
+        const int perRow = 14;
+        int n = 0;
+        foreach (var entry in colors.Palettes)
+        {
+            if (n++ % perRow != 0) ImGui.SameLine();
+            if (ImGui.ColorButton($"##{entry.Id}", Swatch(entry.Id), 0, new System.Numerics.Vector2(22, 22)))
+            {
+                id = entry.Id;
+                changed = true;
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(entry.Name);
+        }
+        if (changed) ImGui.CloseCurrentPopup();
+        ImGui.EndPopup();
+        return changed;
+    }
+
+    // Color shown for a palette (what it gives to a mid-grey pixel). Cached because the palette files are read once.
+    private System.Numerics.Vector4 Swatch(string id)
+    {
+        if (_swatches.TryGetValue(id, out var cached)) return cached;
+        var color = new System.Numerics.Vector4(0.5f, 0.5f, 0.5f, 1);
+        if (_index!.Colors.ReadPalette(id) is { } palette)
+        {
+            var (r, g, b) = Swtor.Formats.Dds.PaletteTint.Swatch(palette);
+            color = new System.Numerics.Vector4(r, g, b, 1);
+        }
+        return _swatches[id] = color;
+    }
+
     private void DrawSchemeChoice(string slot, EquipChoice choice)
     {
         var variants = choice.Asset.Materials;
@@ -159,12 +232,14 @@ public sealed partial class CharacterPanel
         if (ImGui.Selectable("(default colors)", choice.SchemeId is null))
         {
             choice.SchemeId = null;
+            choice.PrimaryId = choice.SecondaryId = null;
             Rebuild();
         }
         foreach (string id in ids)
         {
             if (colors.FindScheme(id) is not { } scheme || !ImGui.Selectable($"{scheme.Name}##{id}", id == choice.SchemeId)) continue;
             choice.SchemeId = id;
+            choice.PrimaryId = choice.SecondaryId = null;
             Rebuild();
         }
         ImGui.EndCombo();

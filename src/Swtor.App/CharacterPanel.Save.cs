@@ -25,7 +25,7 @@ public sealed partial class CharacterPanel
         {
             var materials = choice.Asset.Materials;
             string? material = materials.Count > 0 ? materials[Math.Min(choice.Variant, materials.Count - 1)].Id : null;
-            save.Equipment[slot] = new SavedEquipment(choice.Asset.Id, material, choice.SchemeId);
+            save.Equipment[slot] = new SavedEquipment(choice.Asset.Id, material, choice.SchemeId, choice.PrimaryId, choice.SecondaryId);
         }
         return save;
     }
@@ -78,6 +78,8 @@ public sealed partial class CharacterPanel
             {
                 Variant = Math.Max(0, found.Asset.Materials.ToList().FindIndex(m => m.Id == saved.MaterialId)),
                 SchemeId = saved.SchemeId,
+                PrimaryId = saved.PrimaryId,
+                SecondaryId = saved.SecondaryId,
             };
             _equipment[slot] = choice;
         }

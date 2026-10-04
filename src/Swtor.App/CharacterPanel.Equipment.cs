@@ -16,6 +16,14 @@ public sealed partial class CharacterPanel
         public AppearanceAsset Asset { get; } = asset;
         public int Variant { get; set; }
         public string? SchemeId { get; set; }
+
+        /// <summary>Palette asset ids picked by hand. They replace the palettes of the scheme. Null keeps the scheme (or the original colors).</summary>
+        public string? PrimaryId { get; set; }
+
+        public string? SecondaryId { get; set; }
+
+        /// <summary>True when the last build found a color mask, so the item can be colored. Set by the build.</summary>
+        public bool HasMask { get; set; } = true;
     }
 
     // Slots that can hold equipment. The first four show a bare body part when empty.
@@ -45,6 +53,8 @@ public sealed partial class CharacterPanel
                 var variant = choice.Asset.Materials.Count > 0 ? choice.Asset.Materials[Math.Min(choice.Variant, choice.Asset.Materials.Count - 1)] : null;
                 part = PartResolver.ResolveAsset(_index, choice.Asset, variant?.Id, gender, bodytype);
                 (primary, secondary) = SchemePalettes(choice.SchemeId, slot);
+                if (choice.PrimaryId is not null) primary = _index.Colors.ReadPalette(choice.PrimaryId) ?? primary;
+                if (choice.SecondaryId is not null) secondary = _index.Colors.ReadPalette(choice.SecondaryId) ?? secondary;
             }
             else if (NakedSlots.Contains(slot)
                 && _index.Appearances.FindAsset(slot, NakedBody.AssetName(slot, _spec.Race, headName)) is { } naked)
@@ -58,6 +68,7 @@ public sealed partial class CharacterPanel
             }
             if (part is null) continue;
 
+            if (choice is not null) choice.HasMask = part.MaskPath is not null;
             var texture = LoadTexture(part, tint, primary, secondary);
             AddModel(part.ModelPath, texture, slot);
             foreach (string attachment in part.Attachments) AddModel(attachment, texture, slot);

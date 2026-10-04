@@ -150,3 +150,8 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 
 - An armor art name is `<slot>_<style>_<weight>_<class>_<number>`: weight is `light`, `med` or `heavy`; class is `ge` (generic) or `bh`, `tr`, `sw`, `ss` (Sith Inquisitor), `sm`, `sp` (Imperial Agent), `jk`, `jw` (Jedi Consular). `ArmorInfo.Parse` reads them. The codes were checked against French item names.
 - The equipment lists have a weight filter and a class filter (all slots). Adaptive armor is not in the art names. Item objects only show a crafting profession such as `prfProfessionArmormechAdaptive`, so it is not offered.
+
+## Dyeing equipment
+
+- Like the dye modules of the game, each equipped item has a free Primary and Secondary color. The choices are garment palettes (`garmenthue`, 720 of them) in a swatch grid. They replace the palettes of the chosen color scheme. Choosing a scheme, or "(default colors)", clears them. Saved as `primaryId`/`secondaryId` (optional) in `SavedEquipment`.
+- A swatch is the color that the palette gives to a mid-grey pixel (`PaletteTint.Swatch`). Items without a color mask (`part.MaskPath` null) cannot be dyed. The dye uses the same approximate `PaletteTint` as the schemes.

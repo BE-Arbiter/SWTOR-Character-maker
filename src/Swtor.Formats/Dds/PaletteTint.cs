@@ -42,6 +42,16 @@ public static class PaletteTint
         return new DdsImage(diffuse.Width, diffuse.Height, result);
     }
 
+    /// <summary>
+    /// The color that <paramref name="palette"/> gives to a mid-grey pixel, as RGB in the range 0 to 1. Used for the swatches of the color pickers.
+    /// </summary>
+    public static (float R, float G, float B) Swatch(Palette palette)
+    {
+        float r = 0.5f, g = 0.5f, b = 0.5f;
+        Blend(ref r, ref g, ref b, palette, 1f);
+        return (r, g, b);
+    }
+
     // Keeps the brightness of the pixel (with contrast and brightness from the palette) and replaces the color.
     private static void Blend(ref float r, ref float g, ref float b, Palette palette, float amount)
     {
