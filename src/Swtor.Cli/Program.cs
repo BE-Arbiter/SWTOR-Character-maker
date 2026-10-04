@@ -14,6 +14,14 @@ if (args.Length >= 1 && args[0] == "index")
 
 
 
+if (args.Length >= 3 && args[0] == "stb")
+{
+    var table = Swtor.Formats.Stb.StringTable.Parse(File.ReadAllBytes(Path.Combine(DefaultRoot(), "fr-fr", "str", args[1].Replace('/', Path.DirectorySeparatorChar))));
+    foreach (var (id, text) in table.Entries().Where(e => args[2] == "*" || e.Text.Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(60)) Console.WriteLine($"{id}: {text.Replace('\n', ' ')}");
+    return 0;
+}
+
+
 if (args.Length >= 2 && args[0] == "appearance")
     return AppearanceCommand(args);
 

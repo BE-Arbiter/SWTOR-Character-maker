@@ -62,14 +62,18 @@ public sealed partial class CharacterPanel
         }
         ImGui.SameLine();
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.BeginCombo("##armorclass", _classFilter is null ? "All classes" : ArmorInfo.Classes[_classFilter]))
+        if (ImGui.BeginCombo("##armorclass", _classFilter is null ? "All classes" : ArmorClassName(_classFilter)))
         {
             if (ImGui.Selectable("All classes", _classFilter is null)) _classFilter = null;
-            foreach (var (code, name) in ArmorInfo.Classes)
-                if (ImGui.Selectable(name, code == _classFilter)) _classFilter = code;
+            foreach (string code in ArmorInfo.Classes.Keys)
+                if (ImGui.Selectable(ArmorClassName(code), code == _classFilter)) _classFilter = code;
             ImGui.EndCombo();
         }
     }
+
+    // Class name in the game language. The generic look has no game text.
+    private string ArmorClassName(string code) =>
+        ArmorInfo.ClassKey(code) is { } key ? _text.Class(key) : ArmorInfo.Classes[code];
 
     private bool PassesArmorFilters(EquipEntry entry) =>
         (_weightFilter == ArmorWeight.Unknown || entry.Armor.Weight == _weightFilter)
@@ -80,7 +84,8 @@ public sealed partial class CharacterPanel
         _equipment.TryGetValue(slot, out var choice);
         var options = EquipOptions(slot);
         bool filtered = _weightFilter != ArmorWeight.Unknown || _classFilter is not null;
-        ImGui.TextDisabled(filtered ? $"{slot} ({options.Count(PassesArmorFilters)} of {options.Count})" : $"{slot} ({options.Count})");
+        string slotName = _text.EquipSlot(slot);
+        ImGui.TextDisabled(filtered ? $"{slotName} ({options.Count(PassesArmorFilters)} / {options.Count})" : $"{slotName} ({options.Count})");
 
         _equipFilter.TryGetValue(slot, out string? filter);
         filter ??= "";
@@ -119,7 +124,7 @@ public sealed partial class CharacterPanel
         if (choice is null) return;
         DrawVariantChoice(choice);
         DrawSchemeChoice(slot, choice);
-        DrawDyeChoice(choice);
+        DrawDyeChoice(slot, choice);
     }
 
     private void DrawVariantChoice(EquipChoice choice)
@@ -147,10 +152,23 @@ public sealed partial class CharacterPanel
         return item is null ? file : $"{file} - {item.Name}";
     }
 
-    private readonly Dictionary<string, System.Numerics.Vector4> _swatches = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Numerics.Vector4> _swatches = new();
+
+    /// <summary>
+    /// Reads all garment palettes and computes their swatches on a background thread, so the color picker opens at once.
+    /// Call once when the asset index is ready.
+    /// </summary>
+    public void PrecachePalettes()
+    {
+        if (_index is not { } index) return;
+        Task.Run(() =>
+        {
+            foreach (var entry in index.Colors.Palettes) Swatch(index, entry.Id);
+        });
+    }
 
     // Free choice of the two colors of an item, like the dye modules of the game. The palettes are the garment palettes of the game.
-    private void DrawDyeChoice(EquipChoice choice)
+    private void DrawDyeChoice(string slot, EquipChoice choice)
     {
         if (_index is null) return;
         if (!choice.HasMask)
@@ -159,7 +177,7 @@ public sealed partial class CharacterPanel
             return;
         }
         string? primary = choice.PrimaryId, secondary = choice.SecondaryId;
-        bool changed = DrawPalettePicker("Primary", ref primary) | DrawPalettePicker("Secondary", ref secondary);
+        bool changed = DrawPalettePicker("Primary", slot, ref primary) | DrawPalettePicker("Secondary", slot, ref secondary);
         if (!changed) return;
         choice.PrimaryId = primary;
         choice.SecondaryId = secondary;
@@ -167,19 +185,18 @@ public sealed partial class CharacterPanel
     }
 
     // A swatch button that opens a grid of all palettes. Returns true when the choice changed. A null id means "from the scheme".
-    private bool DrawPalettePicker(string label, ref string? id)
+    private bool DrawPalettePicker(string label, string slot, ref string? id)
     {
         var colors = _index!.Colors;
         string popup = "##palette" + label;
-        string current = id is null ? "(scheme)" : colors.FindPaletteEntry(id)?.Name ?? id;
+        string current = id is null ? "(scheme)" : PaletteLabel(colors.FindPaletteEntry(id)?.Name ?? id);
 
         ImGui.AlignTextToFramePadding();
         ImGui.Text(label);
         ImGui.SameLine(80);
-        if (id is not null) ImGui.ColorButton("##current" + label, Swatch(id), 0, new System.Numerics.Vector2(20, 20));
+        if (id is not null) ImGui.ColorButton("##current" + label, Swatch(_index, id), 0, new System.Numerics.Vector2(20, 20));
         else ImGui.Dummy(new System.Numerics.Vector2(20, 20));
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(-1);
         if (ImGui.Button($"{current}##open{label}", new System.Numerics.Vector2(-1, 0))) ImGui.OpenPopup(popup);
 
         bool changed = false;
@@ -189,29 +206,73 @@ public sealed partial class CharacterPanel
             id = null;
             changed = true;
         }
-        const int perRow = 14;
-        int n = 0;
-        foreach (var entry in colors.Palettes)
-        {
-            if (n++ % perRow != 0) ImGui.SameLine();
-            if (ImGui.ColorButton($"##{entry.Id}", Swatch(entry.Id), 0, new System.Numerics.Vector2(22, 22)))
-            {
-                id = entry.Id;
-                changed = true;
-            }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(entry.Name);
-        }
+
+        // Three groups: the colors already used on this character, the dyes, then all the others.
+        var inUse = PalettesInUse().Select(colors.FindPaletteEntry).OfType<PaletteEntry>().ToList();
+        var used = new HashSet<string>(inUse.Select(p => p.Id));
+        var dyes = colors.Palettes.Where(p => !used.Contains(p.Id) && IsDye(p)).ToList();
+        var others = colors.Palettes.Where(p => !used.Contains(p.Id) && !IsDye(p)).ToList();
+        changed |= DrawPaletteGroup("Colors in use", inUse, ref id);
+        changed |= DrawPaletteGroup("Dyes", dyes, ref id);
+        changed |= DrawPaletteGroup("Other colors", others, ref id);
+
         if (changed) ImGui.CloseCurrentPopup();
         ImGui.EndPopup();
         return changed;
     }
 
-    // Color shown for a palette (what it gives to a mid-grey pixel). Cached because the palette files are read once.
-    private System.Numerics.Vector4 Swatch(string id)
+    // A subtitle and a grid of swatches. Returns true when a swatch was clicked.
+    private bool DrawPaletteGroup(string title, IReadOnlyList<PaletteEntry> entries, ref string? id)
+    {
+        if (entries.Count == 0) return false;
+        ImGui.Spacing();
+        ImGui.TextColored(new System.Numerics.Vector4(0.6f, 0.75f, 1f, 1f), $"{title} ({entries.Count})");
+        ImGui.Separator();
+        const int perRow = 14;
+        bool changed = false;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (i % perRow != 0) ImGui.SameLine();
+            var entry = entries[i];
+            if (ImGui.ColorButton($"##{title}{entry.Id}", Swatch(_index!, entry.Id), 0, new System.Numerics.Vector2(22, 22)))
+            {
+                id = entry.Id;
+                changed = true;
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(PaletteLabel(entry.Name));
+        }
+        return changed;
+    }
+
+    // Palette ids that the equipped items use now: the colors picked by hand and the colors of the chosen schemes.
+    private IEnumerable<string> PalettesInUse()
+    {
+        var ids = new List<string>();
+        foreach (var (slot, choice) in _equipment)
+        {
+            if (choice.SchemeId is not null && _index!.Colors.FindScheme(choice.SchemeId) is { } scheme && scheme.Slots.TryGetValue(slot, out var pair))
+            {
+                ids.Add(pair.Primary);
+                ids.Add(pair.Secondary);
+            }
+            if (choice.PrimaryId is not null) ids.Add(choice.PrimaryId);
+            if (choice.SecondaryId is not null) ids.Add(choice.SecondaryId);
+        }
+        return ids.Distinct();
+    }
+
+    private static bool IsDye(PaletteEntry palette) => palette.Name.Contains("_dye_", StringComparison.OrdinalIgnoreCase);
+
+    // The game has no names for single palettes in the extract. "garmenthue_dye_h35_p" becomes "dye h35 p".
+    private static string PaletteLabel(string name) =>
+        (name.StartsWith("garmenthue_", StringComparison.OrdinalIgnoreCase) ? name["garmenthue_".Length..] : name).Replace('_', ' ');
+
+    // Color shown for a palette (what it gives to a mid-grey pixel). The palette files are read once.
+    private System.Numerics.Vector4 Swatch(AssetIndex index, string id)
     {
         if (_swatches.TryGetValue(id, out var cached)) return cached;
         var color = new System.Numerics.Vector4(0.5f, 0.5f, 0.5f, 1);
-        if (_index!.Colors.ReadPalette(id) is { } palette)
+        if (index.Colors.ReadPalette(id) is { } palette)
         {
             var (r, g, b) = Swtor.Formats.Dds.PaletteTint.Swatch(palette);
             color = new System.Numerics.Vector4(r, g, b, 1);

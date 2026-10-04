@@ -48,13 +48,21 @@ public sealed class ColorCatalog
     /// <summary>Reads a palette file by asset id. The result is cached. Null if the id or file is missing.</summary>
     public Palette? ReadPalette(string id)
     {
-        if (_loaded.TryGetValue(id, out var cached)) return cached;
+        lock (_loaded)
+        {
+            if (_loaded.TryGetValue(id, out var cached)) return cached;
+            return _loaded[id] = ReadPaletteFile(id);
+        }
+    }
+
+    private Palette? ReadPaletteFile(string id)
+    {
         Palette? palette = null;
         if (_palettes.TryGetValue(id, out var entry))
         {
             string path = Path.Combine(_root, entry.FileName.Replace('\\', '/').TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
             if (File.Exists(path)) palette = PaletteReader.Parse(File.ReadAllText(path));
         }
-        return _loaded[id] = palette;
+        return palette;
     }
 }

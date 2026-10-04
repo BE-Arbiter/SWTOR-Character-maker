@@ -155,3 +155,15 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 
 - Like the dye modules of the game, each equipped item has a free Primary and Secondary color. The choices are garment palettes (`garmenthue`, 720 of them) in a swatch grid. They replace the palettes of the chosen color scheme. Choosing a scheme, or "(default colors)", clears them. Saved as `primaryId`/`secondaryId` (optional) in `SavedEquipment`.
 - A swatch is the color that the palette gives to a mid-grey pixel (`PaletteTint.Swatch`). Items without a color mask (`part.MaskPath` null) cannot be dyed. The dye uses the same approximate `PaletteTint` as the schemes.
+
+## Translations (`UiText`)
+
+- `UiText` (Swtor.Assets) gives names of classes, races, genders, appearance slots, equipment slots and body types in the game language, with an English fallback. The text tables have ids only, so the ids are constants in `UiText`: `gui/classnames.stb`, `gui/backgroundnames.stb` (races), `gui/charactercreate.stb` (slot titles in capitals, "Type de corps", Agile/Athlétique/Fort/Robuste, Homme/Femme), `gui/equipslot.stb`. `swtor stb <table> <text or *>` lists a table (for example `swtor stb gui/charactercreate.stb '*'`).
+- Not translated, because the extract has no text: single palette names (shown as "dye h35 p"), the generic armor look, face hair and age slots, and the app's own labels ("Primary", "Sort", weights).
+- Body type: the third letter of the code in art names. `a` Agile, `n` Athlétique, `s` Fort, `f` or `b` Robuste (checked by measuring the naked body models: `s` is the tallest, `a` the smallest, `f`/`b` the widest). The head list is filtered by the body of the selected head; changing the body picks the head with the same look.
+
+## Color picker and speed
+
+- The palette picker has three groups with subtitles: colors in use on the character (picked by hand or from schemes), dyes (`_dye_` in the name), other colors.
+- `PrecachePalettes` reads all palette files and computes the swatches on a background thread at start. `ColorCatalog.ReadPalette` is thread-safe.
+- `DdsCache` keeps decoded DDS images (384 MB budget, oldest dropped first). A rebuild of the character went from about 400 ms to about 140 ms with a warm cache. Cached images are read-only: all color functions return new images.

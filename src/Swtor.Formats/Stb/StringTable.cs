@@ -46,6 +46,10 @@ public sealed class StringTable
         return new StringTable(data, entries);
     }
 
+    /// <summary>All entries (id and text), in no particular order. For tools and debugging.</summary>
+    public IEnumerable<(long Id, string Text)> Entries() =>
+        _entries.Select(e => (e.Key, Encoding.UTF8.GetString(_data, e.Value.Offset, e.Value.Length)));
+
     /// <summary>Returns the text for an id, or null if there is none.</summary>
     public string? Get(long id) =>
         _entries.TryGetValue(id, out var e) ? Encoding.UTF8.GetString(_data, e.Offset, e.Length) : null;

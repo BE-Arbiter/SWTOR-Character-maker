@@ -25,6 +25,13 @@ public sealed record ArmorInfo(ArmorWeight Weight, string? ClassCode)
         ["jw"] = "Jedi Consular",
     };
 
+    /// <summary>Game class code of an art class code ("bh" gives "bounty_hunter"), used to find the class name in the game language. Null for "ge".</summary>
+    public static string? ClassKey(string code) => code switch
+    {
+        "bh" => "bounty_hunter", "tr" => "trooper", "sw" => "sith_warrior", "ss" => "sith_inquisitor",
+        "sm" => "smuggler", "sp" => "imperial_agent", "jk" => "jedi_knight", "jw" => "jedi_consular", _ => null,
+    };
+
     public static ArmorInfo Parse(string artName)
     {
         string[] parts = artName.Split('_');

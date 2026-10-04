@@ -61,7 +61,7 @@ public sealed partial class CharacterPanel
         if (path is null) return null;
         try
         {
-            return DdsReader.Decode(File.ReadAllBytes(_index.FullPath(path)));
+            return _images.Get(_index.FullPath(path));
         }
         catch (Exception e) when (e is GameFormatException or IOException)
         {

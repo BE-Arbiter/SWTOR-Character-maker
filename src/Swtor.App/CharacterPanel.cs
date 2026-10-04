@@ -35,6 +35,8 @@ public sealed partial class CharacterPanel
     private string _class = "", _gender = "", _race = "";
     private bool _legacy;
     private string? _error;
+    private UiText _text = UiText.Empty;
+    private readonly DdsCache _images = new();
 
     public CharacterPanel(GraphicsDevice device, ModelPreview preview)
     {
@@ -48,6 +50,8 @@ public sealed partial class CharacterPanel
         bool first = _catalog is null && catalog is not null;
         _index = index;
         _catalog = catalog;
+        if (_index is not null) _text = UiText.Load(_index.Root);
+        if (first) PrecachePalettes();
         if (first && catalog!.Specs.Count > 0)
         {
             var spec = catalog.Specs.FirstOrDefault(s => s.Class == "trooper" && s.Gender == "male" && s.Race == "human" && !s.IsLegacy) ?? catalog.Specs[0];
@@ -111,22 +115,22 @@ public sealed partial class CharacterPanel
         bool newLegacy = _legacy;
 
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.BeginCombo("##class", Pretty(_class)))
+        if (ImGui.BeginCombo("##class", _text.Class(_class)))
         {
-            foreach (var c in catalog.Classes) if (ImGui.Selectable(Pretty(c), c == _class)) newClass = c;
+            foreach (var c in catalog.Classes) if (ImGui.Selectable(_text.Class(c), c == _class)) newClass = c;
             ImGui.EndCombo();
         }
         ImGui.SetNextItemWidth(120);
-        if (ImGui.BeginCombo("##gender", Pretty(_gender)))
+        if (ImGui.BeginCombo("##gender", _text.Gender(_gender)))
         {
-            foreach (var g in catalog.Genders(_class)) if (ImGui.Selectable(Pretty(g), g == _gender)) newGender = g;
+            foreach (var g in catalog.Genders(_class)) if (ImGui.Selectable(_text.Gender(g), g == _gender)) newGender = g;
             ImGui.EndCombo();
         }
         ImGui.SameLine();
         ImGui.SetNextItemWidth(-60);
-        if (ImGui.BeginCombo("##race", Pretty(_race)))
+        if (ImGui.BeginCombo("##race", _text.Race(_race)))
         {
-            foreach (var r in catalog.Races(_class, _gender)) if (ImGui.Selectable(Pretty(r), r == _race)) newRace = r;
+            foreach (var r in catalog.Races(_class, _gender)) if (ImGui.Selectable(_text.Race(r), r == _race)) newRace = r;
             ImGui.EndCombo();
         }
         ImGui.SameLine();
@@ -192,11 +196,22 @@ public sealed partial class CharacterPanel
         if (options.Count == 0) return;
 
         var current = OptionFor(slot);
-        ImGui.Text($"{slot} ({options.Count})");
-        ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo($"##{slot}", current is null ? "(none)" : Label(current))) return;
-
         bool changed = false;
+        if (slot == AppearanceSlot.Head)
+        {
+            changed = DrawBodyChoice(options, current);
+            current = OptionFor(slot);
+            string body = BodyOf(current) ?? "";
+            options = options.Where(o => BodyOf(o) == body).ToList();
+        }
+        ImGui.Text($"{_text.Slot(slot)} ({options.Count})");
+        ImGui.SetNextItemWidth(-1);
+        if (!ImGui.BeginCombo($"##{slot}", current is null ? "(none)" : Label(current)))
+        {
+            if (changed) Rebuild();
+            return;
+        }
+
         if (OptionalSlots.Contains(slot) && ImGui.Selectable("(none)", current is null))
         {
             _selected.Remove(slot);
@@ -211,6 +226,45 @@ public sealed partial class CharacterPanel
         }
         ImGui.EndCombo();
         if (changed) Rebuild();
+    }
+
+    // Body type code of a head ("bma"), the third part of its art name: head_human_bma_caucasian_a01.
+    private string? BodyOf(CharacterOption? head) =>
+        head is null || _index?.Appearances.FindAsset(head.AssetId)?.Asset.ArtName.Split('_') is not { Length: > 2 } parts ? null : parts[2];
+
+    // Body size order: agile, athletic, strong, robust (the third letter of the code).
+    private static int BodyOrder(string code) => code.Length >= 3 ? "anSfb".IndexOf(code[2], StringComparison.OrdinalIgnoreCase) : 9;
+
+    // The "Body" choice that comes before the head list. The heads of other body types are hidden.
+    // A new body type selects the head with the same look, or the first head of that body. Returns true when the head changed.
+    private bool DrawBodyChoice(IReadOnlyList<CharacterOption> heads, CharacterOption? current)
+    {
+        var bodies = heads.Select(BodyOf).Where(b => b is not null).Select(b => b!).Distinct().OrderBy(BodyOrder).ToList();
+        if (bodies.Count < 2) return false;
+
+        string currentBody = BodyOf(current) ?? bodies[0];
+        ImGui.Text(_text.BodyTypeTitle);
+        ImGui.SetNextItemWidth(-1);
+        if (!ImGui.BeginCombo("##body", _text.BodyType(currentBody))) return false;
+
+        string? picked = null;
+        foreach (string body in bodies)
+            if (ImGui.Selectable($"{_text.BodyType(body)} ({heads.Count(h => BodyOf(h) == body)})##{body}", body == currentBody)) picked = body;
+        ImGui.EndCombo();
+        if (picked is null || picked == currentBody) return false;
+
+        // Same look: the art name without the body code (head_human_bma_caucasian_a01 gives head_human_caucasian_a01).
+        string Look(CharacterOption h)
+        {
+            var parts = _index!.Appearances.FindAsset(h.AssetId)!.Value.Asset.ArtName.Split('_').ToList();
+            if (parts.Count > 2) parts.RemoveAt(2);
+            return string.Join('_', parts);
+        }
+        var candidates = heads.Where(h => BodyOf(h) == picked).ToList();
+        var match = current is null ? null : candidates.FirstOrDefault(h => Look(h) == Look(current)) ?? candidates.FirstOrDefault(h => h.MaterialId == current.MaterialId);
+        _selected[AppearanceSlot.Head] = (match ?? candidates[0]).Key;
+        ReapplyCompatibility();
+        return true;
     }
 
     // After a head change, keep each other slot if its option is still allowed. Otherwise take the first allowed one.
@@ -232,7 +286,7 @@ public sealed partial class CharacterPanel
         var options = Allowed(slot);
         if (options.Count == 0 || _index is null) return;
 
-        ImGui.Text($"{slot} ({options.Count})");
+        ImGui.Text($"{_text.Slot(slot)} ({options.Count})");
         float width = ImGui.GetContentRegionAvail().X - 24;
         bool changed = false;
         float x = 0;
@@ -287,8 +341,8 @@ public sealed partial class CharacterPanel
         if (diffusePath is null || _index is null) return null;
         try
         {
-            var image = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(diffusePath)));
-            DdsImage? mask = maskPath is null ? null : DdsReader.Decode(File.ReadAllBytes(_index.FullPath(maskPath)));
+            var image = _images.Get(_index.FullPath(diffusePath));
+            DdsImage? mask = maskPath is null ? null : _images.Get(_index.FullPath(maskPath));
             if (tint is { } t) image = ImageColor.MatchAverage(image, mask, new Vector3(t.X, t.Y, t.Z));
             if (primary is not null || secondary is not null) image = PaletteTint.Apply(image, mask, primary, secondary);
             if (after is not null) image = after(image);
