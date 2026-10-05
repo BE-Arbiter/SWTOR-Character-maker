@@ -51,4 +51,15 @@ public class ImageColorTests
         Assert.Equal([255, 0, 0], result.Rgba.AsSpan(0, 3).ToArray());
         Assert.Equal([10, 20, 30], result.Rgba.AsSpan(4, 3).ToArray());
     }
+
+    [Fact]
+    public void CutOut_WhiteRedIsHole_BlackRedIsSolid()
+    {
+        var holes = new DdsImage(2, 1, [255, 0, 0, 255, 0, 0, 0, 255]);
+
+        var result = ImageColor.CutOut(Solid(10, 20, 30, 128), holes, 0.5f);
+
+        Assert.Equal([10, 20, 30, 0], result.Rgba.AsSpan(0, 4).ToArray());
+        Assert.Equal([10, 20, 30, 255], result.Rgba.AsSpan(4, 4).ToArray());
+    }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -16,8 +17,17 @@ public sealed record ColorScheme(string Guid, string Name, IReadOnlyDictionary<s
 /// <summary>
 /// A garment palette (art/dynamic/garmenthue/*.xml). Hue and saturation define the color.
 /// Brightness is an offset (about -0.5 to 0.9). Contrast is a factor (0 to 3).
+/// <see cref="Representative"/> is the color that the game shows for the palette (the "Representativecolor" element, sRGB 0 to 1), or null.
 /// </summary>
-public sealed record Palette(string Name, float Hue, float Saturation, float Brightness, float Contrast);
+public sealed record Palette(string Name, float Hue, float Saturation, float Brightness, float Contrast, Vector3? Representative = null)
+{
+    /// <summary>
+    /// True for the filler palettes of the game (many files share the same values and a grey representative color of about 0.338).
+    /// They are not real colors.
+    /// </summary>
+    public bool IsPlaceholder =>
+        Representative is { } c && Math.Abs(c.X - 0.3382f) < 0.002f && Math.Abs(c.Y - 0.3363f) < 0.002f && Math.Abs(c.Z - 0.3363f) < 0.002f;
+}
 
 public static class ColorSchemeIndexReader
 {
@@ -71,12 +81,24 @@ public static class PaletteReader
                 ?? throw new GameFormatException("Palette has no root element", 0);
             return new Palette(
                 root.Element("Name")?.Value ?? "",
-                Number(root, "Hue"), Number(root, "Saturation"), Number(root, "Brightness"), Number(root, "Contrast", 1f));
+                Number(root, "Hue"), Number(root, "Saturation"), Number(root, "Brightness"), Number(root, "Contrast", 1f),
+                Color(root, "Representativecolor"));
         }
         catch (XmlException e)
         {
             throw new GameFormatException($"Invalid palette: {e.Message}", e.LinePosition);
         }
+    }
+
+    // "r, g, b" with values from 0 to 1. Null when the element is missing or not valid.
+    private static Vector3? Color(XElement root, string name)
+    {
+        string[]? parts = root.Element(name)?.Value.Split(',');
+        if (parts is not { Length: >= 3 }) return null;
+        var v = new float[3];
+        for (int i = 0; i < 3; i++)
+            if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out v[i])) return null;
+        return new Vector3(v[0], v[1], v[2]);
     }
 
     private static float Number(XElement root, string name, float fallback = 0f) =>

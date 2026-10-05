@@ -17,6 +17,8 @@ public sealed record MaterialOverride(int Index, string FileName);
 /// One entry of a slot <c>index.xml</c> (art/dynamic/&lt;slot&gt;/index.xml):
 /// a model, its extra model files and its material variants.
 /// File names may contain the "[bt]" placeholder (body type, for example "bfa" or "bmn").
+/// <see cref="SkinMaterialIndex"/> is the mesh piece that shows bare skin (it takes the skin material of the body for the slot), or -1.
+/// <see cref="SkinMaterials"/> (heads only) gives the material of the bare body for each slot ("chest", "hand", "leg", "boot"), or null.
 /// </summary>
 public sealed record AppearanceAsset(
     string Id,
@@ -25,7 +27,9 @@ public sealed record AppearanceAsset(
     IReadOnlyList<string> Attachments,
     IReadOnlyList<AssetMaterial> Materials,
     IReadOnlyList<string> Bodytypes,
-    string? RepresentativeColor = null);
+    string? RepresentativeColor = null,
+    int SkinMaterialIndex = -1,
+    IReadOnlyDictionary<string, string>? SkinMaterials = null);
 
 public static class AppearanceIndexReader
 {
@@ -59,6 +63,8 @@ public static class AppearanceIndexReader
         var schemeLists = new List<List<string>>();
         var overrideLists = new List<List<MaterialOverride>>();
         string? representative = null;
+        int skinIndex = -1;
+        Dictionary<string, string>? skinMaterials = null;
         var bodytypes = new List<string>();
 
         // ReadElementContentAsString already moves to the next node, so Read() runs only when nothing was consumed.
@@ -77,6 +83,12 @@ public static class AppearanceIndexReader
                 case "ArtName": artName = xml.ReadElementContentAsString(); break;
                 case "BaseFile": baseFile = xml.ReadElementContentAsString(); break;
                 case "Bodytype": bodytypes.Add(xml.ReadElementContentAsString()); break;
+                case "SkinMaterialIndex": skinIndex = int.TryParse(xml.ReadElementContentAsString(), out int s) ? s : -1; break;
+                case "SkinMaterial":
+                    if (xml.GetAttribute("slot") is { Length: > 0 } skinSlot)
+                        (skinMaterials ??= [])[skinSlot] = xml.GetAttribute("filename") ?? "";
+                    xml.Read();
+                    break;
                 case "Data":
                     // Skin, hair and eye color entries carry a color to show in menus: "r,g,b" in the range 0 to 1.
                     representative ??= xml.GetAttribute("RepresentativeColor");
@@ -105,6 +117,6 @@ public static class AppearanceIndexReader
                 default: xml.Read(); break;
             }
         }
-        return new AppearanceAsset(id, artName, baseFile, attachments, materials, bodytypes, representative);
+        return new AppearanceAsset(id, artName, baseFile, attachments, materials, bodytypes, representative, skinIndex, skinMaterials);
     }
 }

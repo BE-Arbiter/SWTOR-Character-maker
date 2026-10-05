@@ -68,12 +68,15 @@ public sealed partial class CharacterPanel
         _preview.Clear();
         foreach (var texture in _textures) texture.Dispose();
         _textures.Clear();
+        ClearExport();
+        ApplyStartupEquipment();
 
         char gender = _spec.Gender == "female" ? 'f' : 'm';
         ResolvedPart? headPart = null;
         foreach (var slot in ModelSlots)
         {
-            if (OptionFor(slot) is not { } option) continue;
+            if ((slot == AppearanceSlot.Head ? HeadOption() : OptionFor(slot)) is not { } option) continue;
+            if (slot == AppearanceSlot.Hair && _hideHairUnderHelmet && (_equipment.ContainsKey("face") || HoodShownUp())) continue;
             if (PartResolver.Resolve(_index, option, gender, headPart?.Bodytype) is not { } part) continue;
             if (slot == AppearanceSlot.Head) headPart = part;
             if (slot == AppearanceSlot.Head)
@@ -84,8 +87,8 @@ public sealed partial class CharacterPanel
             AddModel(part.ModelPath, LoadTexture(part, TintFor(slot)), slot.ToString());
         }
 
-        string? headName = OptionFor(AppearanceSlot.Head) is { } head ? _index.Appearances.FindAsset(head.AssetId)?.Asset.ArtName : null;
-        AddBodyAndEquipment(gender, headPart?.Bodytype, headName);
+        var headAsset = HeadOption() is { } head ? _index.Appearances.FindAsset(head.AssetId)?.Asset : null;
+        AddBodyAndEquipment(gender, headPart?.Bodytype, headAsset);
         _preview.Frame(this);
     }
 
@@ -106,6 +109,7 @@ public sealed partial class CharacterPanel
         foreach (var slot in ColorSlots) DrawColorSlot(slot);
         ImGui.Separator();
         DrawEquipment();
+        DrawGallery();
     }
 
     private void DrawSpecChoice()
@@ -114,25 +118,32 @@ public sealed partial class CharacterPanel
         string? newClass = null, newGender = null, newRace = null;
         bool newLegacy = _legacy;
 
-        ImGui.SetNextItemWidth(-1);
+        int step = Stepper.Before("class");
         if (ImGui.BeginCombo("##class", _text.Class(_class)))
         {
             foreach (var c in catalog.Classes) if (ImGui.Selectable(_text.Class(c), c == _class)) newClass = c;
             ImGui.EndCombo();
         }
-        ImGui.SetNextItemWidth(120);
+        step += Stepper.After("class");
+        if (step != 0) newClass = StepValue(catalog.Classes, _class, step);
+
+        step = Stepper.Before("gender", 100);
         if (ImGui.BeginCombo("##gender", _text.Gender(_gender)))
         {
             foreach (var g in catalog.Genders(_class)) if (ImGui.Selectable(_text.Gender(g), g == _gender)) newGender = g;
             ImGui.EndCombo();
         }
+        step += Stepper.After("gender");
+        if (step != 0) newGender = StepValue(catalog.Genders(_class), _gender, step);
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(-60);
+        step = Stepper.Before("race", 0, 60);
         if (ImGui.BeginCombo("##race", _text.Race(_race)))
         {
             foreach (var r in catalog.Races(_class, _gender)) if (ImGui.Selectable(_text.Race(r), r == _race)) newRace = r;
             ImGui.EndCombo();
         }
+        step += Stepper.After("race");
+        if (step != 0) newRace = StepValue(catalog.Races(_class, _gender), _race, step);
         ImGui.SameLine();
         bool hasLegacy = catalog.Find(_class, _gender, _race, true) is not null;
         if (hasLegacy && ImGui.Checkbox("Legacy", ref newLegacy)) { }
@@ -147,6 +158,13 @@ public sealed partial class CharacterPanel
             SelectSpec(c, g, r, newLegacy);
             Rebuild();
         }
+    }
+
+    // The value that comes step places after current in the list (wraps around).
+    private static string StepValue(IReadOnlyList<string> values, string current, int step)
+    {
+        int at = Stepper.Move(values.Count, values.ToList().IndexOf(current), step, false);
+        return at < 0 ? current : values[at];
     }
 
     private void SelectSpec(string className, string gender, string race, bool legacy)
@@ -205,27 +223,43 @@ public sealed partial class CharacterPanel
             options = options.Where(o => BodyOf(o) == body).ToList();
         }
         ImGui.Text($"{_text.Slot(slot)} ({options.Count})");
-        ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo($"##{slot}", current is null ? "(none)" : Label(current)))
+        string id = slot.ToString();
+        bool optional = OptionalSlots.Contains(slot);
+        int step = Stepper.Before(id);
+        if (ImGui.BeginCombo($"##{slot}", current is null ? "(none)" : Label(current)))
         {
-            if (changed) Rebuild();
-            return;
+            if (optional && ImGui.Selectable("(none)", current is null))
+            {
+                _selected.Remove(slot);
+                changed = true;
+            }
+            foreach (var option in options)
+            {
+                if (!ImGui.Selectable($"{Label(option)}##{option.Key}", option.Key == current?.Key)) continue;
+                _selected[slot] = option.Key;
+                changed = true;
+                if (slot == AppearanceSlot.Head) ReapplyCompatibility();
+            }
+            ImGui.EndCombo();
         }
-
-        if (OptionalSlots.Contains(slot) && ImGui.Selectable("(none)", current is null))
+        step += Stepper.After(id);
+        if (step != 0)
         {
-            _selected.Remove(slot);
-            changed = true;
-        }
-        foreach (var option in options)
-        {
-            if (!ImGui.Selectable($"{Label(option)}##{option.Key}", option.Key == current?.Key)) continue;
-            _selected[slot] = option.Key;
+            int at = Stepper.Move(options.Count, IndexOfKey(options, current), step, optional);
+            if (at < 0) _selected.Remove(slot);
+            else _selected[slot] = options[at].Key;
             changed = true;
             if (slot == AppearanceSlot.Head) ReapplyCompatibility();
         }
-        ImGui.EndCombo();
         if (changed) Rebuild();
+        if (slot == AppearanceSlot.Head) DrawNpcHeadChoice();
+    }
+
+    private static int IndexOfKey(IReadOnlyList<CharacterOption> options, CharacterOption? option)
+    {
+        for (int i = 0; i < options.Count; i++)
+            if (options[i].Key == option?.Key) return i;
+        return -1;
     }
 
     // Body type code of a head ("bma"), the third part of its art name: head_human_bma_caucasian_a01.
@@ -244,13 +278,16 @@ public sealed partial class CharacterPanel
 
         string currentBody = BodyOf(current) ?? bodies[0];
         ImGui.Text(_text.BodyTypeTitle);
-        ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##body", _text.BodyType(currentBody))) return false;
-
+        int step = Stepper.Before("body");
         string? picked = null;
-        foreach (string body in bodies)
-            if (ImGui.Selectable($"{_text.BodyType(body)} ({heads.Count(h => BodyOf(h) == body)})##{body}", body == currentBody)) picked = body;
-        ImGui.EndCombo();
+        if (ImGui.BeginCombo("##body", _text.BodyType(currentBody)))
+        {
+            foreach (string body in bodies)
+                if (ImGui.Selectable($"{_text.BodyType(body)} ({heads.Count(h => BodyOf(h) == body)})##{body}", body == currentBody)) picked = body;
+            ImGui.EndCombo();
+        }
+        step += Stepper.After("body");
+        if (step != 0) picked = bodies[Stepper.Move(bodies.Count, bodies.IndexOf(currentBody), step, false)];
         if (picked is null || picked == currentBody) return false;
 
         // Same look: the art name without the body code (head_human_bma_caucasian_a01 gives head_human_caucasian_a01).
@@ -327,16 +364,25 @@ public sealed partial class CharacterPanel
     {
         var colorSlot = slot switch { AppearanceSlot.Head => AppearanceSlot.SkinColor, AppearanceSlot.Hair or AppearanceSlot.FaceHair => AppearanceSlot.HairColor, _ => (AppearanceSlot?)null };
         if (colorSlot is null || OptionFor(colorSlot.Value) is not { } option) return null;
+        if (colorSlot == AppearanceSlot.SkinColor && KeepNpcColors) return null;
         var color = _index?.Appearances.FindAsset(option.AssetId)?.Asset.RepresentativeColor;
         return color is null ? null : ParseColor(color);
     }
 
-    private Texture2D? LoadTexture(ResolvedPart part, Vector4? tint, Palette? primary = null, Palette? secondary = null) =>
-        LoadTexture(part.DiffusePath, part.MaskPath, tint, primary, secondary, null);
+    // With an opacity map, the holes of the material go in the alpha channel and the preview draws the texture last.
+    private Texture2D? LoadTexture(ResolvedPart part, Vector4? tint, Palette? primary = null, Palette? secondary = null)
+    {
+        Func<DdsImage, DdsImage>? cutOut = part.OpacityPath is { } opacity
+            ? image => ImageColor.CutOut(image, _images.Get(_index!.FullPath(opacity)), part.AlphaTest)
+            : null;
+        var texture = LoadTexture(part.DiffusePath, part.MaskPath, tint, primary, secondary, cutOut, part.PaletteMapPath);
+        if (texture is not null && cutOut is not null) _preview.MarkCutOut(texture);
+        return texture;
+    }
 
     // Builds a texture. <paramref name="tint"/> is the wanted average color of the masked area (see ImageColor.MatchAverage).
     // <paramref name="after"/> can add overlays (complexion, face paint) after the color change.
-    private Texture2D? LoadTexture(string? diffusePath, string? maskPath, Vector4? tint, Palette? primary, Palette? secondary, Func<DdsImage, DdsImage>? after)
+    private Texture2D? LoadTexture(string? diffusePath, string? maskPath, Vector4? tint, Palette? primary, Palette? secondary, Func<DdsImage, DdsImage>? after, string? paletteMapPath = null)
     {
         if (diffusePath is null || _index is null) return null;
         try
@@ -344,10 +390,12 @@ public sealed partial class CharacterPanel
             var image = _images.Get(_index.FullPath(diffusePath));
             DdsImage? mask = maskPath is null ? null : _images.Get(_index.FullPath(maskPath));
             if (tint is { } t) image = ImageColor.MatchAverage(image, mask, new Vector3(t.X, t.Y, t.Z));
-            if (primary is not null || secondary is not null) image = PaletteTint.Apply(image, mask, primary, secondary);
+            DdsImage? paletteMap = paletteMapPath is null || _index is null ? null : _images.Get(_index.FullPath(paletteMapPath));
+            if (primary is not null || secondary is not null) image = PaletteTint.Apply(image, mask, primary, secondary, paletteMap);
             if (after is not null) image = after(image);
             var texture = TextureLoader.Create(_device, image);
             _textures.Add(texture);
+            _imageOf[texture] = image;
             return texture;
         }
         catch (Exception e) when (e is GameFormatException or IOException)

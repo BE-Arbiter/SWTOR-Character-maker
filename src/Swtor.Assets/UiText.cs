@@ -39,7 +39,7 @@ public sealed class UiText
     private static readonly Dictionary<string, long> EquipSlotIds = new()
     {
         ["chest"] = EquipSlots + 3, ["leg"] = EquipSlots + 4, ["bracer"] = EquipSlots + 5,
-        ["waist"] = EquipSlots + 6, ["hand"] = EquipSlots + 7, ["boot"] = EquipSlots + 8,
+        ["waist"] = EquipSlots + 6, ["hand"] = EquipSlots + 7, ["boot"] = EquipSlots + 8, ["face"] = EquipSlots + 9,
     };
 
     private readonly StringTable? _create, _classes, _races, _equip;

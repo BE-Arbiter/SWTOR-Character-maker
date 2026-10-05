@@ -31,13 +31,7 @@ public sealed partial class CharacterPanel
         if (_index is null) return;
         ImGui.Text("Equipment");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.BeginCombo("##sort", $"Sort: {SortLabel(_equipSort)}"))
-        {
-            foreach (var mode in Enum.GetValues<EquipSort>())
-                if (ImGui.Selectable(SortLabel(mode), mode == _equipSort)) _equipSort = mode;
-            ImGui.EndCombo();
-        }
+        DrawSortChoice();
         DrawArmorFilters();
         if (_items is null) ImGui.TextDisabled("Item names are loading...");
 
@@ -47,6 +41,15 @@ public sealed partial class CharacterPanel
             DrawEquipSlot(slot);
             ImGui.PopID();
         }
+    }
+
+    private void DrawSortChoice()
+    {
+        ImGui.SetNextItemWidth(-1);
+        if (!ImGui.BeginCombo("##sort", $"Sort: {SortLabel(_equipSort)}")) return;
+        foreach (var mode in Enum.GetValues<EquipSort>())
+            if (ImGui.Selectable(SortLabel(mode), mode == _equipSort)) _equipSort = mode;
+        ImGui.EndCombo();
     }
 
     // Weight and class filters. They apply to every slot. The weight and the class come from the art name (see ArmorInfo).
@@ -92,8 +95,8 @@ public sealed partial class CharacterPanel
         ImGui.SetNextItemWidth(110);
         if (ImGui.InputTextWithHint("##filter", "name or art", ref filter, 64)) _equipFilter[slot] = filter;
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(-1);
         string none = NakedSlots.Contains(slot) ? "(bare)" : "(none)";
+        int step = Stepper.Before("asset", 0, 28);
         if (ImGui.BeginCombo("##asset", choice is null ? none : EntryLabel(MakeEntry(choice.Asset))))
         {
             if (ImGui.Selectable(none, choice is null))
@@ -120,27 +123,64 @@ public sealed partial class CharacterPanel
             }
             ImGui.EndCombo();
         }
+        step += Stepper.After("asset");
+        ImGui.SameLine(0, ImGui.GetStyle().ItemSpacing.X / 2);
+        if (ImGui.Button("...##gallery", new System.Numerics.Vector2(22, 0))) _galleryRequest = slot;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Browse with icons");
+        if (step != 0) StepEquipment(slot, choice, options, filter, step);
 
+        if (slot == "face" && choice is not null && ImGui.Checkbox("Hide hair", ref _hideHairUnderHelmet)) Rebuild();
+        if (choice is not null && HasHood(choice.Asset))
+        {
+            bool helmet = _equipment.ContainsKey("face");
+            if (helmet) ImGui.BeginDisabled();
+            if (ImGui.Checkbox(helmet ? "Hood up (not with a helmet)" : "Hood up", ref _hoodUp)) Rebuild();
+            if (helmet) ImGui.EndDisabled();
+            // The helmet slot has its own check box. Both change the same setting.
+            if (HoodShownUp())
+            {
+                ImGui.SameLine();
+                if (ImGui.Checkbox("Hide hair##hood", ref _hideHairUnderHelmet)) Rebuild();
+            }
+        }
         if (choice is null) return;
         DrawVariantChoice(choice);
         DrawSchemeChoice(slot, choice);
         DrawDyeChoice(slot, choice);
     }
 
+    // The entries that pass the name filter and the weight and class filters.
+    private List<EquipEntry> FilterEntries(List<EquipEntry> options, string filter) =>
+        options.Where(e => (filter.Length == 0 || e.SearchText.Contains(filter, StringComparison.OrdinalIgnoreCase)) && PassesArmorFilters(e)).ToList();
+
+    // Goes to the previous or next item of the list as the filters show it. Past the ends comes the empty slot.
+    private void StepEquipment(string slot, EquipChoice? choice, List<EquipEntry> options, string filter, int step)
+    {
+        var shown = FilterEntries(options, filter);
+        int at = Stepper.Move(shown.Count, choice is null ? -1 : shown.FindIndex(e => e.Asset == choice.Asset), step, true);
+        if (at < 0) _equipment.Remove(slot);
+        else _equipment[slot] = new EquipChoice(shown[at].Asset);
+        Rebuild();
+    }
+
     private void DrawVariantChoice(EquipChoice choice)
     {
         var variants = choice.Asset.Materials;
         if (variants.Count < 2) return;
-        ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##variant", VariantLabel(choice.Asset, variants[choice.Variant]))) return;
-        for (int i = 0; i < variants.Count; i++)
+        int step = Stepper.Before("variant");
+        int picked = -1;
+        if (ImGui.BeginCombo("##variant", VariantLabel(choice.Asset, variants[choice.Variant])))
         {
-            if (!ImGui.Selectable($"{VariantLabel(choice.Asset, variants[i])}##{i}", i == choice.Variant)) continue;
-            choice.Variant = i;
-            choice.SchemeId = null;
-            Rebuild();
+            for (int i = 0; i < variants.Count; i++)
+                if (ImGui.Selectable($"{VariantLabel(choice.Asset, variants[i])}##{i}", i == choice.Variant)) picked = i;
+            ImGui.EndCombo();
         }
-        ImGui.EndCombo();
+        step += Stepper.After("variant");
+        if (step != 0) picked = Stepper.Move(variants.Count, choice.Variant, step, false);
+        if (picked < 0) return;
+        choice.Variant = picked;
+        choice.SchemeId = null;
+        Rebuild();
     }
 
     // Material file name, with the name of an item that uses this variant when there is one.
@@ -176,50 +216,125 @@ public sealed partial class CharacterPanel
             ImGui.TextDisabled("This item has no color mask.");
             return;
         }
+        var (schemePrimary, schemeSecondary) = SchemePalettes(choice.SchemeId, slot);
         string? primary = choice.PrimaryId, secondary = choice.SecondaryId;
-        bool changed = DrawPalettePicker("Primary", slot, ref primary) | DrawPalettePicker("Secondary", slot, ref secondary);
-        if (!changed) return;
+        Palette? primaryCustom = choice.PrimaryCustom, secondaryCustom = choice.SecondaryCustom;
+        bool rebuild = DrawPalettePicker("Primary", slot, ref primary, ref primaryCustom, schemePrimary)
+            | DrawPalettePicker("Secondary", slot, ref secondary, ref secondaryCustom, schemeSecondary);
+        // Custom values change while a slider moves (the swatch follows). The texture is only rebuilt when the slider is released.
         choice.PrimaryId = primary;
         choice.SecondaryId = secondary;
-        Rebuild();
+        choice.PrimaryCustom = primaryCustom;
+        choice.SecondaryCustom = secondaryCustom;
+        if (rebuild) Rebuild();
     }
 
-    // A swatch button that opens a grid of all palettes. Returns true when the choice changed. A null id means "from the scheme".
-    private bool DrawPalettePicker(string label, string slot, ref string? id)
+    // A swatch button that opens a grid of colors. Returns true when the texture must be rebuilt. A null id and a null custom color
+    // mean "from the scheme". The grid has two groups: the colors of the item (its own color schemes) and the dyes. Other palettes
+    // would not suit the item. Below them, a custom color has the four values of the game shader.
+    // <paramref name="schemePalette"/> is the palette of the scheme, the start of a new custom color.
+    private bool DrawPalettePicker(string label, string slot, ref string? id, ref Palette? custom, Palette? schemePalette)
     {
         var colors = _index!.Colors;
         string popup = "##palette" + label;
-        string current = id is null ? "(scheme)" : PaletteLabel(colors.FindPaletteEntry(id)?.Name ?? id);
+        string current = custom is not null ? $"Custom ({DescribeColor(CustomSwatch(custom))})" : id is null ? "(scheme)" : ColorLabel(id);
 
         ImGui.AlignTextToFramePadding();
         ImGui.Text(label);
         ImGui.SameLine(80);
-        if (id is not null) ImGui.ColorButton("##current" + label, Swatch(_index, id), 0, new System.Numerics.Vector2(20, 20));
+        if (custom is not null) ImGui.ColorButton("##current" + label, CustomSwatch(custom), 0, new System.Numerics.Vector2(20, 20));
+        else if (id is not null) ImGui.ColorButton("##current" + label, Swatch(_index, id), 0, new System.Numerics.Vector2(20, 20));
         else ImGui.Dummy(new System.Numerics.Vector2(20, 20));
         ImGui.SameLine();
         if (ImGui.Button($"{current}##open{label}", new System.Numerics.Vector2(-1, 0))) ImGui.OpenPopup(popup);
 
-        bool changed = false;
         if (!ImGui.BeginPopup(popup)) return false;
-        if (ImGui.Selectable("(from scheme)", id is null))
+        bool picked = false;
+        if (ImGui.Selectable("(from scheme)", id is null && custom is null))
         {
             id = null;
-            changed = true;
+            picked = true;
         }
 
-        // Three groups: the colors already used on this character, the dyes, then all the others.
-        var inUse = PalettesInUse().Select(colors.FindPaletteEntry).OfType<PaletteEntry>().ToList();
-        var used = new HashSet<string>(inUse.Select(p => p.Id));
-        var dyes = colors.Palettes.Where(p => !used.Contains(p.Id) && IsDye(p)).ToList();
-        var others = colors.Palettes.Where(p => !used.Contains(p.Id) && !IsDye(p)).ToList();
-        changed |= DrawPaletteGroup("Colors in use", inUse, ref id);
-        changed |= DrawPaletteGroup("Dyes", dyes, ref id);
-        changed |= DrawPaletteGroup("Other colors", others, ref id);
+        var own = _equipment.TryGetValue(slot, out var choice) ? OwnColors(slot, choice.Asset) : [];
+        var taken = new HashSet<string>(own.Select(p => p.Id));
+        var dyes = DyeColors().Where(p => !taken.Contains(p.Id)).ToList();
+        string? shownId = custom is null ? id : null;
+        if (DrawPaletteGroup("Colors of this item", own, ref shownId) | DrawPaletteGroup("Dyes", dyes, ref shownId))
+        {
+            id = shownId;
+            picked = true;
+        }
+        if (picked)
+        {
+            custom = null;
+            ImGui.CloseCurrentPopup();
+            ImGui.EndPopup();
+            return true;
+        }
 
-        if (changed) ImGui.CloseCurrentPopup();
+        string? chosen = id;
+        bool rebuild = DrawCustomColor(label, ref custom, () => (chosen is null ? null : colors.ReadPalette(chosen)) ?? schemePalette);
+        if (rebuild && custom is not null) id = null;
         ImGui.EndPopup();
-        return changed;
+        return rebuild;
     }
+
+    // The custom color part of a palette picker: a button that starts one from the current color, then four sliders with the values of
+    // the game shader. The sliders show "Saturation" the usual way round (the game value is 1 - saturation).
+    // Returns true when the texture must be rebuilt: a slider was released, or the custom color was made or removed.
+    private bool DrawCustomColor(string label, ref Palette? custom, Func<Palette?> current)
+    {
+        ImGui.Spacing();
+        ImGui.TextColored(new System.Numerics.Vector4(0.6f, 0.75f, 1f, 1f), "Custom color");
+        ImGui.Separator();
+        if (custom is null)
+        {
+            if (!ImGui.Button($"Make a custom color from the current one##custom{label}")) return false;
+            var start = current() ?? Swtor.Formats.Dds.PaletteTint.Custom(0f, 0.5f, 0f, 1f);
+            custom = Swtor.Formats.Dds.PaletteTint.Custom(start.Hue, start.Saturation, start.Brightness, start.Contrast);
+            return true;
+        }
+
+        float hue = custom.Hue * 360f, saturation = 1f - custom.Saturation, brightness = custom.Brightness, contrast = custom.Contrast;
+        bool edited = false, released = false;
+        ImGui.ColorButton($"##customswatch{label}", CustomSwatch(custom), 0, new System.Numerics.Vector2(60, 60));
+        ImGui.SameLine();
+        ImGui.BeginGroup();
+        ImGui.SetNextItemWidth(220);
+        edited |= ImGui.SliderFloat($"Hue##{label}", ref hue, 0f, 360f, "%.0f");
+        released |= ImGui.IsItemDeactivatedAfterEdit();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Turns the colors of the item around the color wheel (degrees).");
+        ImGui.SetNextItemWidth(220);
+        edited |= ImGui.SliderFloat($"Saturation##{label}", ref saturation, 0f, 1f, "%.2f");
+        released |= ImGui.IsItemDeactivatedAfterEdit();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("0 is grey, 1 is full color.");
+        ImGui.SetNextItemWidth(220);
+        edited |= ImGui.SliderFloat($"Brightness##{label}", ref brightness, -1f, 1f, "%.2f");
+        released |= ImGui.IsItemDeactivatedAfterEdit();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Neutral 0. Higher is lighter (white near 1), lower is darker.");
+        ImGui.SetNextItemWidth(220);
+        edited |= ImGui.SliderFloat($"Contrast##{label}", ref contrast, 0f, 3f, "%.2f");
+        released |= ImGui.IsItemDeactivatedAfterEdit();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Neutral 1. 0 gives a flat color. High values keep light highlights on worn areas (the game black uses 3).");
+        ImGui.EndGroup();
+        if (edited) custom = Swtor.Formats.Dds.PaletteTint.Custom(hue / 360f, 1f - saturation, brightness, contrast);
+
+        if (ImGui.Button($"Remove the custom color##custom{label}"))
+        {
+            custom = null;
+            return true;
+        }
+        return released;
+    }
+
+    private static System.Numerics.Vector4 CustomSwatch(Palette custom)
+    {
+        var (r, g, b) = Swtor.Formats.Dds.PaletteTint.Swatch(custom);
+        return new System.Numerics.Vector4(r, g, b, 1);
+    }
+
+    private static string DescribeColor(System.Numerics.Vector4 c) => Swtor.Formats.Dds.ColorNames.Describe(c.X, c.Y, c.Z);
 
     // A subtitle and a grid of swatches. Returns true when a swatch was clicked.
     private bool DrawPaletteGroup(string title, IReadOnlyList<PaletteEntry> entries, ref string? id)
@@ -234,31 +349,71 @@ public sealed partial class CharacterPanel
         {
             if (i % perRow != 0) ImGui.SameLine();
             var entry = entries[i];
+            bool selected = entry.Id == id;
+            if (selected) ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 2f);
             if (ImGui.ColorButton($"##{title}{entry.Id}", Swatch(_index!, entry.Id), 0, new System.Numerics.Vector2(22, 22)))
             {
                 id = entry.Id;
                 changed = true;
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(PaletteLabel(entry.Name));
+            if (selected) ImGui.PopStyleVar();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(ColorLabel(entry.Id));
         }
         return changed;
     }
 
-    // Palette ids that the equipped items use now: the colors picked by hand and the colors of the chosen schemes.
-    private IEnumerable<string> PalettesInUse()
+    // The palettes of the color schemes of an item, for its slot: what the game gives to this item. Sorted by color.
+    private List<PaletteEntry> OwnColors(string slot, AppearanceAsset asset)
     {
-        var ids = new List<string>();
-        foreach (var (slot, choice) in _equipment)
+        var colors = _index!.Colors;
+        var ids = new HashSet<string>();
+        foreach (var material in asset.Materials)
+            foreach (string schemeId in material.ColorSchemeIds)
+                if (colors.FindScheme(schemeId) is { } scheme && scheme.Slots.TryGetValue(slot, out var pair))
+                {
+                    ids.Add(pair.Primary);
+                    ids.Add(pair.Secondary);
+                }
+        return SortedByColor(ids.Select(colors.FindPaletteEntry).OfType<PaletteEntry>().Where(IsRealColor));
+    }
+
+    // The dyes of the game: palettes that any item can take. The filler palettes are left out. Colors that look the same are listed once.
+    private List<PaletteEntry> DyeColors()
+    {
+        if (_dyes is not null) return _dyes;
+        var seen = new HashSet<(int, int, int)>();
+        var list = new List<PaletteEntry>();
+        foreach (var palette in SortedByColor(_index!.Colors.Palettes.Where(p => IsDye(p) && IsRealColor(p))))
         {
-            if (choice.SchemeId is not null && _index!.Colors.FindScheme(choice.SchemeId) is { } scheme && scheme.Slots.TryGetValue(slot, out var pair))
-            {
-                ids.Add(pair.Primary);
-                ids.Add(pair.Secondary);
-            }
-            if (choice.PrimaryId is not null) ids.Add(choice.PrimaryId);
-            if (choice.SecondaryId is not null) ids.Add(choice.SecondaryId);
+            var c = Swatch(_index, palette.Id);
+            if (seen.Add(((int)(c.X * 100), (int)(c.Y * 100), (int)(c.Z * 100)))) list.Add(palette);
         }
-        return ids.Distinct();
+        return _dyes = list;
+    }
+
+    private List<PaletteEntry>? _dyes;
+
+    private bool IsRealColor(PaletteEntry entry) => _index!.Colors.ReadPalette(entry.Id) is { IsPlaceholder: false };
+
+    // Grays first from dark to light, then the colors by hue and lightness.
+    private List<PaletteEntry> SortedByColor(IEnumerable<PaletteEntry> entries) =>
+        entries.OrderBy(e => ColorKey(Swatch(_index!, e.Id))).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static (int Group, float Hue, float Light) ColorKey(System.Numerics.Vector4 c)
+    {
+        float max = Math.Max(c.X, Math.Max(c.Y, c.Z)), min = Math.Min(c.X, Math.Min(c.Y, c.Z));
+        float light = (max + min) / 2, chroma = max - min;
+        if (chroma < 0.08f || light < 0.07f) return (0, 0, light);
+        float h = max == c.X ? (c.Y - c.Z) / chroma % 6 : max == c.Y ? (c.Z - c.X) / chroma + 2 : (c.X - c.Y) / chroma + 4;
+        return (1, h < 0 ? h + 6 : h, light);
+    }
+
+    // "Navy (dye h57 p)": the name of the color, then the file name of the palette.
+    private string ColorLabel(string id)
+    {
+        var c = Swatch(_index!, id);
+        string file = PaletteLabel(_index!.Colors.FindPaletteEntry(id)?.Name ?? id);
+        return $"{Swtor.Formats.Dds.ColorNames.Describe(c.X, c.Y, c.Z)} ({file})";
     }
 
     private static bool IsDye(PaletteEntry palette) => palette.Name.Contains("_dye_", StringComparison.OrdinalIgnoreCase);
@@ -288,22 +443,37 @@ public sealed partial class CharacterPanel
         if (ids.Count == 0) return;
 
         var colors = _index.Colors;
-        ImGui.SetNextItemWidth(-1);
-        if (!ImGui.BeginCombo("##scheme", choice.SchemeId is null ? "(default colors)" : colors.FindScheme(choice.SchemeId)?.Name ?? choice.SchemeId)) return;
-        if (ImGui.Selectable("(default colors)", choice.SchemeId is null))
+        int step = Stepper.Before("scheme");
+        bool picked = false;
+        string? pickedId = choice.SchemeId;
+        if (ImGui.BeginCombo("##scheme", choice.SchemeId is null ? "(default colors)" : colors.FindScheme(choice.SchemeId)?.Name ?? choice.SchemeId))
         {
-            choice.SchemeId = null;
-            choice.PrimaryId = choice.SecondaryId = null;
-            Rebuild();
+            if (ImGui.Selectable("(default colors)", choice.SchemeId is null))
+            {
+                pickedId = null;
+                picked = true;
+            }
+            foreach (string id in ids)
+            {
+                if (colors.FindScheme(id) is not { } scheme || !ImGui.Selectable($"{scheme.Name}##{id}", id == choice.SchemeId)) continue;
+                pickedId = id;
+                picked = true;
+            }
+            ImGui.EndCombo();
         }
-        foreach (string id in ids)
+        step += Stepper.After("scheme");
+        if (step != 0)
         {
-            if (colors.FindScheme(id) is not { } scheme || !ImGui.Selectable($"{scheme.Name}##{id}", id == choice.SchemeId)) continue;
-            choice.SchemeId = id;
-            choice.PrimaryId = choice.SecondaryId = null;
-            Rebuild();
+            var known = ids.Where(i => colors.FindScheme(i) is not null).ToList();
+            int at = Stepper.Move(known.Count, choice.SchemeId is null ? -1 : known.IndexOf(choice.SchemeId), step, true);
+            pickedId = at < 0 ? null : known[at];
+            picked = true;
         }
-        ImGui.EndCombo();
+        if (!picked) return;
+        choice.SchemeId = pickedId;
+        choice.PrimaryId = choice.SecondaryId = null;
+        choice.PrimaryCustom = choice.SecondaryCustom = null;
+        Rebuild();
     }
 
     // Assets of a slot that have a model for the current body type, with their item names, in the chosen order.

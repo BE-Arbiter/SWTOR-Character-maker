@@ -98,6 +98,27 @@ public static class ImageColor
         return new DdsImage(image.Width, image.Height, result);
     }
 
+    /// <summary>
+    /// Sets the alpha channel from the red channel of <paramref name="holes"/> (any size, nearest pixel). In garment rotation
+    /// maps ("_n") red is the transparency: white is a hole, black is solid. The result is 0 where the opacity (1 - red) is below
+    /// <paramref name="threshold"/> (0 to 1), otherwise 255. This is the alpha test of the game baked in the texture. Returns a new image.
+    /// </summary>
+    public static DdsImage CutOut(DdsImage image, DdsImage holes, float threshold)
+    {
+        var result = (byte[])image.Rgba.Clone();
+        int limit = (int)MathF.Round(Math.Clamp(threshold, 0, 1) * 255);
+        for (int y = 0; y < image.Height; y++)
+        {
+            int oy = y * holes.Height / image.Height;
+            for (int x = 0; x < image.Width; x++)
+            {
+                int o = (oy * holes.Width + x * holes.Width / image.Width) * 4;
+                result[(y * image.Width + x) * 4 + 3] = 255 - holes.Rgba[o] >= limit ? (byte)255 : (byte)0;
+            }
+        }
+        return new DdsImage(image.Width, image.Height, result);
+    }
+
     // Weight of each pixel from the red channel of the mask (any size, nearest pixel). 1 everywhere without a mask.
     private static float[] Weights(DdsImage image, DdsImage? mask)
     {

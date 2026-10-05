@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Jka\jka_template.json" LogicalName="jka_template.json" />
+    <EmbeddedResource Include="Jka/jka_humanoid.json" LogicalName="jka_humanoid.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 

@@ -7,10 +7,16 @@ namespace Swtor.Assets;
 /// <summary>
 /// An equippable item that shows an art asset. <see cref="Name"/> is the localized item name.
 /// <see cref="Quality"/> is the index of the game enum value (higher is rarer) and <see cref="QualityName"/> its name.
+/// <see cref="AppearanceName"/> is the name of the appearance object ("ipp.*"). The icon of the item is the file
+/// <c>gfx/icons/&lt;AppearanceName&gt;.dds</c> (see <see cref="IconPath"/>).
 /// </summary>
 public sealed record ItemInfo(
     string Key, string Name, int Level, int Quality, string QualityName,
-    AppearanceSlot Slot, long AssetId, long MaterialId);
+    AppearanceSlot Slot, long AssetId, long MaterialId, string? AppearanceName = null)
+{
+    /// <summary>Path of the icon below the asset root, with "/" separators, or null when the item has no appearance object. The file may not exist.</summary>
+    public string? IconPath => AppearanceName is null ? null : $"gfx/icons/{AppearanceName}.dds";
+}
 
 /// <summary>
 /// Items of the game that show armor or clothing, with their names. Each item points to an appearance
@@ -86,7 +92,7 @@ public sealed class ItemCatalog
             int level = o.Find(LevelField)?.Value is long l ? (int)l : 0;
             if (appearances.TryGetValue(appearanceName, out var appearance))
                 items.Add(new ItemInfo(entry.Name, name, level, quality, qualityName,
-                    (AppearanceSlot)appearance.Slot, appearance.Asset, appearance.Material));
+                    (AppearanceSlot)appearance.Slot, appearance.Asset, appearance.Material, appearanceName));
             else
                 // Not an "ipp.*" object: the string is a key of the weapon table.
                 weaponItems.Add((appearanceName, new ItemInfo(entry.Name, name, level, quality, qualityName, 0, 0, 0)));

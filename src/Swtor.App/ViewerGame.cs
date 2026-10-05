@@ -50,19 +50,20 @@ public sealed partial class ViewerGame : Game
     private string? _pendingModel;
     private string? _pendingTexture;
     private string? _pendingMask;
-    private DdsImage? _baseImage, _maskImage;
+    private DdsImage? _baseImage, _maskImage, _paletteMapImage;
     private string? _schemeId, _primaryPalette, _secondaryPalette;
     private string _textureQuery = "";
     private List<string> _textureResults = [];
 
     // Character creator and the game database. The database opens on a background thread.
-    private enum ActiveTab { None, Model, Character, Weapons }
+    private enum ActiveTab { None, Model, Character, Weapons, JediAcademy }
     private CharacterPanel _character = null!;
     private WeaponPanel _weapons = null!;
+    private JkaPanel _jka = null!;
     private volatile WeaponCatalog? _readyWeapons;
     private volatile ItemCatalog? _readyItems;
     private ActiveTab _activeTab = ActiveTab.Model;
-    private bool _showModelTab, _showCharacterTab;
+    private bool _showModelTab, _showCharacterTab, _showJkaTab;
     private GomDatabase? _gom;
     private volatile CharacterCatalog? _readyCatalog;
     private volatile GomDatabase? _readyGom;
@@ -73,7 +74,7 @@ public sealed partial class ViewerGame : Game
     private string _folderInput = "";
 
     public ViewerGame(string? initialModel = null, string? initialScheme = null, bool startOnCharacter = false,
-        IEnumerable<(string Slot, string ArtName)>? equipment = null, string? loadPath = null, string? weaponKey = null)
+        IEnumerable<(string Slot, string ArtName)>? equipment = null, string? loadPath = null, string? weaponKey = null, string? glmPath = null, bool startOnJka = false)
     {
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -95,13 +96,16 @@ public sealed partial class ViewerGame : Game
         _startupEquipment = equipment?.ToList();
         _startupLoadPath = loadPath;
         _startupWeapon = weaponKey;
+        _startupGlm = glmPath;
+        _showJkaTab = startOnJka;
         if (weaponKey is not null) _showWeaponsTab = true;
         if (loadPath is not null) _showCharacterTab = true;
     }
 
     private string? _initialModel, _initialScheme;
     private List<(string Slot, string ArtName)>? _startupEquipment;
-    private readonly string? _startupLoadPath, _startupWeapon;
+    private readonly string? _startupLoadPath, _startupWeapon, _startupGlm;
+    private readonly List<Texture2D> _jkaTextures = [];
     private bool _showWeaponsTab;
 
     // Save and load dialogs.
@@ -115,15 +119,20 @@ public sealed partial class ViewerGame : Game
 
     protected override void Initialize()
     {
+        if (int.TryParse(Environment.GetEnvironmentVariable("SWTOR_SCREEN"), out int screen))
+            ScreenPlacement.Apply(Window, _graphics.PreferredBackBufferWidth, _graphics.PreferredBackBufferHeight, screen);
         _gui = new ImGuiRenderer(this);
         _gui.RebuildFontAtlas();
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
         _preview = new ModelPreview(GraphicsDevice);
         _character = new CharacterPanel(GraphicsDevice, _preview);
+        _character.SetGui(_gui);
         _weapons = new WeaponPanel(GraphicsDevice, _preview);
+        _jka = new JkaPanel(GraphicsDevice, _preview, _character);
         if (_startupEquipment is not null) _character.SetStartupEquipment(_startupEquipment);
         if (_startupLoadPath is not null) LoadCharacter(_startupLoadPath);
         if (_startupWeapon is not null) _weapons.SelectByKey(_startupWeapon);
+        if (_startupGlm is not null) JkaModelView.Load(_preview, GraphicsDevice, _startupGlm, _jkaTextures);
 
         _folderInput = Environment.GetEnvironmentVariable("SWTOR_ASSETS") ?? @"C:\jka_tor_assets\resources";
         StartIndexing(_folderInput, rescan: false);
@@ -144,6 +153,7 @@ public sealed partial class ViewerGame : Game
             _index = ready;
             _scanning = false;
             _explorer.SetIndex(ready);
+            _jka.SetIndex(ready);
             StartGomLoading(ready.Root);
             if (_initialModel is not null)
             {
@@ -167,7 +177,7 @@ public sealed partial class ViewerGame : Game
             _readyCatalog = null;
             _gom = _readyGom;
             _character.SetData(_index, catalog);
-            if (_activeTab == ActiveTab.Character) _character.Rebuild();
+            if (_activeTab is ActiveTab.Character or ActiveTab.JediAcademy) _character.Rebuild();
         }
         if (_scanning) _explorer.Status = _indexError ?? $"Indexing the asset folder... {_scanned} files seen.\nThis happens once. The result is cached.";
 
@@ -365,12 +375,21 @@ public sealed partial class ViewerGame : Game
                 _weapons.Draw();
                 ImGui.EndTabItem();
             }
+            var jkaFlags = _showJkaTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            _showJkaTab = false;
+            bool jkaOpen = true;
+            if (ImGui.BeginTabItem("Jedi Academy", ref jkaOpen, jkaFlags))
+            {
+                active = ActiveTab.JediAcademy;
+                _jka.Draw();
+                ImGui.EndTabItem();
+            }
             ImGui.EndTabBar();
 
             if (active != ActiveTab.None && active != _activeTab)
             {
                 _activeTab = active;
-                if (active == ActiveTab.Character) _character.Rebuild();
+                if (active is ActiveTab.Character or ActiveTab.JediAcademy) _character.Rebuild();
                 else if (active == ActiveTab.Weapons) _weapons.Rebuild();
                 else if (_model is not null) _preview.Load(_model);
                 if (active == ActiveTab.Model && _baseImage is not null) RebuildTexture();
@@ -546,6 +565,7 @@ public sealed partial class ViewerGame : Game
     {
         _baseImage = null;
         _maskImage = null;
+        _paletteMapImage = null;
         _texturePath = null;
         if (relative is not null && _index is not null)
         {
@@ -554,6 +574,10 @@ public sealed partial class ViewerGame : Game
                 _baseImage = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(relative)));
                 _texturePath = relative;
                 if (maskRelative is not null) _maskImage = DdsReader.Decode(File.ReadAllBytes(_index.FullPath(maskRelative)));
+                // The palette map ("_h") has the name of the mask ("_m"). With it the item is colored like in the game.
+                if (maskRelative is not null && maskRelative.EndsWith("_m.dds", StringComparison.OrdinalIgnoreCase)
+                    && _index.FullPath(maskRelative[..^6] + "_h.dds") is var mapPath && File.Exists(mapPath))
+                    _paletteMapImage = DdsReader.Decode(File.ReadAllBytes(mapPath));
             }
             catch (Exception e) when (e is GameFormatException or IOException)
             {
@@ -578,7 +602,7 @@ public sealed partial class ViewerGame : Game
         var colors = _index.Colors;
         var primary = _primaryPalette is null ? null : colors.ReadPalette(_primaryPalette);
         var secondary = _secondaryPalette is null ? null : colors.ReadPalette(_secondaryPalette);
-        var image = PaletteTint.Apply(_baseImage, _maskImage, primary, secondary);
+        var image = PaletteTint.Apply(_baseImage, _maskImage, primary, secondary, _paletteMapImage);
         _texture = TextureLoader.Create(GraphicsDevice, image);
         _textureId = _gui.BindTexture(_texture);
         _preview.Texture = _texture;

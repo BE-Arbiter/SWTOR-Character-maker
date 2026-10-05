@@ -23,6 +23,36 @@ public class CharacterSaveTests
     }
 
     [Fact]
+    public void Json_RoundTrip_KeepsCustomColors()
+    {
+        var save = Sample();
+        save.Equipment["chest"] = new SavedEquipment("1", "2", null, null, "1720514", [0.6f, 0.2f, -0.1f, 1.5f]);
+
+        var loaded = CharacterSave.FromJson(save.ToJson()).Equipment["chest"];
+
+        Assert.NotNull(loaded.PrimaryCustom);
+        Assert.Equal([0.6f, 0.2f, -0.1f, 1.5f], loaded.PrimaryCustom);
+        Assert.Null(loaded.SecondaryCustom);
+        Assert.Equal("1720514", loaded.SecondaryId);
+    }
+
+    [Fact]
+    public void Json_NpcHead_RoundTripsAndDefaultsToOriginalColors()
+    {
+        var save = Sample();
+        save.NpcHead = new SavedOption(3014313, 3014314);
+        save.NpcOriginalColors = false;
+
+        var loaded = CharacterSave.FromJson(save.ToJson());
+        var old = CharacterSave.FromJson("""{ "version": 1, "class": "trooper", "gender": "male", "race": "human" }""");
+
+        Assert.Equal(new SavedOption(3014313, 3014314), loaded.NpcHead);
+        Assert.False(loaded.NpcOriginalColors);
+        Assert.Null(old.NpcHead);
+        Assert.True(old.NpcOriginalColors);
+    }
+
+    [Fact]
     public void SaveAndLoad_ThroughFile_CreatesFolder()
     {
         string path = Path.Combine(Path.GetTempPath(), "swtor-save-test-" + Guid.NewGuid().ToString("N"), "sub", "c.json");

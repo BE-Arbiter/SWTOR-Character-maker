@@ -21,11 +21,14 @@ public sealed partial class CharacterPanel
             if (_spec.Options.FirstOrDefault(o => o.Key == key) is { } option)
                 save.Options[slot.ToString()] = new SavedOption(option.AssetId, option.MaterialId);
         }
+        if (_useNpcHead && HeadOption() is { Key: -1 } npc) save.NpcHead = new SavedOption(npc.AssetId, npc.MaterialId);
+        save.NpcOriginalColors = _npcOriginalColors;
         foreach (var (slot, choice) in _equipment)
         {
             var materials = choice.Asset.Materials;
             string? material = materials.Count > 0 ? materials[Math.Min(choice.Variant, materials.Count - 1)].Id : null;
-            save.Equipment[slot] = new SavedEquipment(choice.Asset.Id, material, choice.SchemeId, choice.PrimaryId, choice.SecondaryId);
+            save.Equipment[slot] = new SavedEquipment(choice.Asset.Id, material, choice.SchemeId, choice.PrimaryId, choice.SecondaryId,
+                ToValues(choice.PrimaryCustom), ToValues(choice.SecondaryCustom));
         }
         return save;
     }
@@ -68,6 +71,7 @@ public sealed partial class CharacterPanel
             }
         }
         ReapplyCompatibility(); // Fixes choices that the new head does not allow.
+        ApplyNpcHead(save);
 
         _equipment.Clear();
         foreach (var (slot, saved) in save.Equipment)
@@ -80,6 +84,8 @@ public sealed partial class CharacterPanel
                 SchemeId = saved.SchemeId,
                 PrimaryId = saved.PrimaryId,
                 SecondaryId = saved.SecondaryId,
+                PrimaryCustom = FromValues(saved.PrimaryCustom),
+                SecondaryCustom = FromValues(saved.SecondaryCustom),
             };
             _equipment[slot] = choice;
         }
@@ -87,6 +93,13 @@ public sealed partial class CharacterPanel
     }
 
     // Applies a save that came in before the game database was ready.
+    // A custom color as saved: hue, saturation, brightness, contrast.
+    private static float[]? ToValues(Swtor.Formats.Xml.Palette? custom) =>
+        custom is null ? null : [custom.Hue, custom.Saturation, custom.Brightness, custom.Contrast];
+
+    private static Swtor.Formats.Xml.Palette? FromValues(float[]? values) =>
+        values is { Length: 4 } v ? Swtor.Formats.Dds.PaletteTint.Custom(v[0], v[1], v[2], v[3]) : null;
+
     private void ApplyPendingSave()
     {
         if (_pendingSave is not { } save) return;

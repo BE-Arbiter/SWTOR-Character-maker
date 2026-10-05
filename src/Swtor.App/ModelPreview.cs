@@ -29,6 +29,7 @@ public sealed class ModelPreview : IDisposable
     private readonly BasicEffect _surface;
     private readonly BasicEffect _lines;
     private readonly List<GpuMesh> _meshes = [];
+    private readonly HashSet<Texture2D> _cutOut = [];
     private VertexPositionColor[] _grid = [];
 
     private Vector3 _boundsMin = new(float.MaxValue), _boundsMax = new(float.MinValue);
@@ -102,6 +103,12 @@ public sealed class ModelPreview : IDisposable
         _boundsMax = max;
     }
 
+    /// <summary>
+    /// Marks a texture whose alpha channel cuts holes (0 = hole, 255 = solid). Pieces with it are drawn after the others with
+    /// alpha blending, so the parts behind them (for example the skin under a small top) are already drawn. Cleared by <see cref="Clear"/>.
+    /// </summary>
+    public void MarkCutOut(Texture2D texture) => _cutOut.Add(texture);
+
     private object? _frameOwner;
 
     /// <summary>
@@ -141,6 +148,7 @@ public sealed class ModelPreview : IDisposable
             m.Indices.Dispose();
         }
         _meshes.Clear();
+        _cutOut.Clear();
         _boundsMin = new Vector3(float.MaxValue);
         _boundsMax = new Vector3(float.MinValue);
     }
@@ -216,22 +224,40 @@ public sealed class ModelPreview : IDisposable
         _device.RasterizerState = Wireframe ? Wireframe_ : CullBackfaces ? RasterizerState.CullCounterClockwise : RasterizerState.CullNone;
         _surface.View = view;
         _surface.Projection = projection;
-        foreach (var mesh in _meshes)
+        // Pass 0 draws solid pieces, pass 1 the pieces with holes.
+        for (int pass = 0; pass < 2; pass++)
         {
-            _device.SetVertexBuffer(mesh.Vertices);
-            _device.Indices = mesh.Indices;
-            foreach (var piece in mesh.Pieces)
+            if (pass == 1) _device.BlendState = BlendState.NonPremultiplied;
+            for (int m = 0; m < _meshes.Count; m++)
             {
-                var pieceTexture = mesh.PieceTextures is not null && mesh.PieceTextures.TryGetValue(piece.MaterialIndex, out var own) ? own : mesh.Texture;
-                _surface.TextureEnabled = pieceTexture is not null;
-                _surface.Texture = pieceTexture;
-                _surface.DiffuseColor = pieceTexture is not null ? Vector3.One : PieceColors[piece.MaterialIndex % PieceColors.Length].ToVector3();
-                _surface.CurrentTechnique.Passes[0].Apply();
-                _device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, piece.StartTriangle * 3, piece.TriangleCount);
+                DrawMesh(_meshes[m], cutOut: pass == 1);
             }
         }
+        _device.BlendState = BlendState.Opaque;
 
         _device.Viewport = oldViewport;
+    }
+
+    // Draws the pieces of a mesh that use a cut-out texture (<paramref name="cutOut"/> true) or the others.
+    private void DrawMesh(GpuMesh mesh, bool cutOut)
+    {
+        bool bound = false;
+        foreach (var piece in mesh.Pieces)
+        {
+            var pieceTexture = mesh.PieceTextures is not null && mesh.PieceTextures.TryGetValue(piece.MaterialIndex, out var own) ? own : mesh.Texture;
+            if ((pieceTexture is not null && _cutOut.Contains(pieceTexture)) != cutOut) continue;
+            if (!bound)
+            {
+                _device.SetVertexBuffer(mesh.Vertices);
+                _device.Indices = mesh.Indices;
+                bound = true;
+            }
+            _surface.TextureEnabled = pieceTexture is not null;
+            _surface.Texture = pieceTexture;
+            _surface.DiffuseColor = pieceTexture is not null ? Vector3.One : PieceColors[piece.MaterialIndex % PieceColors.Length].ToVector3();
+            _surface.CurrentTechnique.Passes[0].Apply();
+            _device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, piece.StartTriangle * 3, piece.TriangleCount);
+        }
     }
 
     private static readonly RasterizerState Wireframe_ = new() { FillMode = FillMode.WireFrame, CullMode = CullMode.None };

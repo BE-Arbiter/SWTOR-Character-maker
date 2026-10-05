@@ -25,7 +25,9 @@ public sealed partial class CharacterPanel
             image => AddFaceOverlays(image, part.Bodytype));
         try
         {
-            _preview.Add(Gr2Reader.Parse(File.ReadAllBytes(_index!.FullPath(part.ModelPath))), skin, pieces.Count > 0 ? pieces : null);
+            var model = Gr2Reader.Parse(File.ReadAllBytes(_index!.FullPath(part.ModelPath)));
+            _preview.Add(model, skin, pieces.Count > 0 ? pieces : null);
+            RecordExport("head", model, skin, false, pieces.GetValueOrDefault(EyeMaterialIndex));
         }
         catch (Exception e) when (e is GameFormatException or IOException)
         {
@@ -48,6 +50,7 @@ public sealed partial class CharacterPanel
     // Complexion (eyebrows, blush) multiplies the skin. Face paint is drawn over it with its alpha.
     private DdsImage AddFaceOverlays(DdsImage skin, string? bodytype)
     {
+        if (KeepNpcColors) return skin;
         if (LoadOverlay(AppearanceSlot.Complexion, bodytype) is { } complexion) skin = ImageColor.Multiply(skin, complexion);
         if (LoadOverlay(AppearanceSlot.FacePaint, bodytype) is { } paint) skin = ImageColor.AlphaOver(skin, paint);
         return skin;
@@ -72,6 +75,7 @@ public sealed partial class CharacterPanel
 
     private Vector4? EyeTint()
     {
+        if (KeepNpcColors) return null;
         if (OptionFor(AppearanceSlot.EyeColor) is not { } option) return null;
         string? color = _index?.Appearances.FindAsset(option.AssetId)?.Asset.RepresentativeColor;
         return color is null ? null : ParseColor(color);

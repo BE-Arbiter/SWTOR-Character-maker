@@ -24,6 +24,8 @@ public class AppearanceReaderTests
               <Material id="6" name="m2" filename="/art/shaders/materials/a_c02_[gen].mat"><ColorSchemes /></Material>
             </Materials>
             <Bodytypes><Bodytype>bfa</Bodytype><Bodytype>bma</Bodytype></Bodytypes>
+            <SkinMaterialIndex>1</SkinMaterialIndex>
+            <CustomData><SkinMaterials><SkinMaterial slot="chest" filename="/art/shaders/materials/chest_naked_x_[bt].mat" /></SkinMaterials></CustomData>
           </Asset>
           <Asset>
             <ID>2</ID>
@@ -50,6 +52,10 @@ public class AppearanceReaderTests
         Assert.Equal(["a_c01_u", "a_c02_[gen]"], first.Materials.Select(m => Path.GetFileNameWithoutExtension(m.FileName)));
         Assert.Equal("other.gr2", Path.GetFileName(assets[1].BaseFile));
         Assert.Empty(assets[1].Materials);
+        Assert.Equal(1, first.SkinMaterialIndex);
+        Assert.Equal(-1, assets[1].SkinMaterialIndex);
+        Assert.Equal("/art/shaders/materials/chest_naked_x_[bt].mat", first.SkinMaterials?["chest"]);
+        Assert.Null(assets[1].SkinMaterials);
     }
 
     [Fact]
@@ -65,6 +71,8 @@ public class AppearanceReaderTests
             <?xml version="1.0" encoding="utf-8"?>
             <Material>
               <Derived>Garment</Derived>
+              <AlphaMode>Test</AlphaMode>
+              <AlphaTestValue>0.25</AlphaTestValue>
               <input><semantic>DiffuseMap</semantic><type>texture</type><value>\art\dynamic\x\tex_d</value></input>
               <input><semantic>GlossMap</semantic><type>texture</type><value>art\dynamic\x\tex_s</value></input>
               <input><semantic>RimWidth</semantic><type>float</type><value>1.5</value></input>
@@ -76,5 +84,6 @@ public class AppearanceReaderTests
         Assert.Equal("art/dynamic/x/tex_d", material.DiffuseMap);
         Assert.Equal("art/dynamic/x/tex_s", material.TexturePath("GlossMap"));
         Assert.Null(material.TexturePath("Missing"));
+        Assert.Equal(("Test", 0.25f), (material.AlphaMode, material.AlphaTestValue));
     }
 }
