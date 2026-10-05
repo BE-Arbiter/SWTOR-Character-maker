@@ -72,6 +72,7 @@ public sealed partial class CharacterPanel
         ApplyStartupEquipment();
 
         char gender = _spec.Gender == "female" ? 'f' : 'm';
+        if (_useNpcHead && _npcHead is { } npcHead) gender = npcHead.Gender; // The body follows the head.
         ResolvedPart? headPart = null;
         foreach (var slot in ModelSlots)
         {
