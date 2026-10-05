@@ -229,3 +229,10 @@ dotnet run --project src/Swtor.Cli -c Release -- gr2 survey   # full-tree parser
 - Tests that open a window must use monitor 2: `SWTOR_SCREEN=2` (1 is the primary monitor, then left to right).
 - `--jka` starts on the Jedi Academy tab. `--glm <file.glm>` shows a Jedi Academy model with its skin (`SWTOR_CAM` for the camera, units are JKA units: `0,0,110,0,33,0` is a front view of the whole body).
 - `SWTOR_JKA_EXPORT="players folder|name[|sound set]"` exports the loaded character as a new model and quits (`players folder|@model.glm` adds to a model). Use it with `--character [--load file.json] [--equip slot=art]`.
+
+## Unpacking .tor archives
+
+- The game keeps its assets in `.tor` files (`<SWTOR>\Assets\swtor_*.tor`, about 100 files, 58 GB). They are MYP archives: `MypArchive` (Swtor.Formats/Myp) reads the tables, `Read(entry)` gives the bytes. Layout is in the class comment. Version 6 files store "compressed" entries with **zstd** (the reader also accepts zlib, found by the first bytes).
+- **Archives hold no names**, only a 64-bit hash of the path (`MypHash`: Jenkins lookup3 `hashlittle2`, seeds 0, over `/resources/<path>`, high half = secondary value). Names must come from outside: `TorNames` takes a tree already extracted (`--tree`, default `SWTOR_ASSETS`) and text lists (`--names`, one path per line, or the `ph#sh#path#crc` lines of community hash lists). Files without a known name go to `<out>/_unknown/<hash>.<ext guessed from the first bytes>`.
+- Checked on `swtor_main_art_dynamic_head_1.tor`: 11,798 of 11,800 files named, 0 differences with the existing tree.
+- CLI: `swtor tor list [tor|folder]`; `swtor tor extract <out> [tor|folder] [--tree root] [--names list] [--filter text] [--jobs n]`. Default source is `SWTOR_GAME_ASSETS` or the EA install folder. `<out>` becomes the asset root (`art`, `gamedata`, ... below it). A file that exists with the right size is skipped, so a run can restart. Names with `..` go to `_unknown`.

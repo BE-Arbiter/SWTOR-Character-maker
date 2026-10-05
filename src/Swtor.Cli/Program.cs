@@ -70,6 +70,9 @@ if (args.Length >= 1 && args[0] == "palettes")
     return 0;
 }
 
+if (args.Length >= 2 && args[0] == "tor")
+    return TorCommand(args);
+
 if (args.Length >= 2 && args[0] == "jka")
     return JkaCommand(args);
 
@@ -81,7 +84,7 @@ if (args.Length >= 2 && args[0] == "dds")
 
 if (args.Length < 2 || args[0] != "gr2")
 {
-    Console.Error.WriteLine("Usage: swtor gr2 info <file> | gr2 survey [root] | dds survey | dds decode <file> <out.ppm> | index [--rescan]");
+    Console.Error.WriteLine("Usage: swtor gr2 info <file> | gr2 survey [root] | dds survey | dds decode <file> <out.ppm> | index [--rescan] | tor list|extract");
     return 1;
 }
 
@@ -1101,9 +1104,66 @@ static int CharCommand(string[] args)
     return 0;
 }
 
+static string DefaultGameAssets() => Environment.GetEnvironmentVariable("SWTOR_GAME_ASSETS")
+    ?? @"C:\Program Files (x86)\Electronic Arts\BioWare\Star Wars - The Old Republic\Assets";
+
+// tor list <tor|folder>: prints the entry count and compression of each archive.
+// tor extract <out> [tor|folder] [--tree <extracted root>] [--names <list.txt>] [--filter <text>] [--jobs <n>]:
+//   unpacks .tor archives (default: the game Assets folder, or SWTOR_GAME_ASSETS). Names come from the tree (default
+//   SWTOR_ASSETS if it exists) and from the lists, because an archive keeps only name hashes. Unnamed files go to <out>/_unknown.
+static int TorCommand(string[] args)
+{
+    static IEnumerable<string> Archives(string path) =>
+        Directory.Exists(path) ? Directory.EnumerateFiles(path, "*.tor").Order() : [path];
+
+    if (args[1] == "list")
+    {
+        foreach (string tor in Archives(args.Length >= 3 ? args[2] : DefaultGameAssets()))
+        {
+            using var archive = Swtor.Formats.Myp.MypArchive.Open(tor);
+            var kinds = string.Join(", ", archive.Entries.GroupBy(e => e.Compression).Select(g => $"{g.Key} {g.Count()}"));
+            Console.WriteLine($"{Path.GetFileName(tor)}: v{archive.Version}, {archive.Entries.Count} files ({kinds})");
+        }
+        return 0;
+    }
+
+    if (args[1] == "extract" && args.Length >= 3)
+    {
+        string outRoot = args[2];
+        string? source = null, filter = null;
+        var lists = new List<string>();
+        var trees = new List<string>();
+        int jobs = 4;
+        for (int i = 3; i < args.Length; i++)
+        {
+            if (args[i] == "--tree" && i + 1 < args.Length) trees.Add(args[++i]);
+            else if (args[i] == "--names" && i + 1 < args.Length) lists.Add(args[++i]);
+            else if (args[i] == "--filter" && i + 1 < args.Length) filter = args[++i];
+            else if (args[i] == "--jobs" && i + 1 < args.Length) jobs = int.Parse(args[++i]);
+            else source = args[i];
+        }
+        if (trees.Count == 0 && Directory.Exists(DefaultRoot())) trees.Add(DefaultRoot());
+
+        var names = new Swtor.Assets.TorNames();
+        foreach (string tree in trees) Console.WriteLine($"{names.AddTree(tree)} names from {tree}");
+        foreach (string list in lists) Console.WriteLine($"{names.AddList(list)} names from {list}");
+
+        var archives = Archives(source ?? DefaultGameAssets()).ToList();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = Swtor.Assets.TorExtractor.Extract(archives, outRoot, names, filter, jobs,
+            new Progress<string>(n => Console.WriteLine($"done {n}")), msg => Console.Error.WriteLine($"error: {msg}"));
+        Console.WriteLine($"{result.Archives}/{archives.Count} archives, {result.Files} files written ({result.Named} named, {result.Unnamed} unnamed), "
+            + $"{result.Skipped} skipped, {result.Failed} failed, {result.Bytes / 1048576} MB in {sw.Elapsed}");
+        return result.Failed == 0 ? 0 : 1;
+    }
+
+    Console.Error.WriteLine("Usage: swtor tor list [tor|folder] | tor extract <out> [tor|folder] [--tree root] [--names list] [--filter text] [--jobs n]");
+    return 1;
+}
+
+
 static class DumpSettings
 {
     /// <summary>Maximum list or map entries printed by "gom dump". Set SWTOR_DUMP_LIMIT to change it.</summary>
     public static readonly int Limit = int.TryParse(Environment.GetEnvironmentVariable("SWTOR_DUMP_LIMIT"), out var limit) ? limit : 12;
 }
-
