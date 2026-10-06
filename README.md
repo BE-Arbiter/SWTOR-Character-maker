@@ -23,7 +23,9 @@ Alternative: the CLI of this repository can also read `.tor` files (`swtor tor l
 
 ## Configuration
 
-Set the asset root with the `SWTOR_ASSETS` environment variable:
+On first start, the app asks for the asset root (the extracted folder with `art`, `gamedata`, ...) and remembers it in `%LOCALAPPDATA%\SwtorCharacterMaker\assets_root.txt`. You can change it later with File > Open asset folder.
+
+You can also set the `SWTOR_ASSETS` environment variable, which takes priority over the saved folder:
 
 ```powershell
 $env:SWTOR_ASSETS = "C:\jka_tor_assets\resources"

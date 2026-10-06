@@ -9,7 +9,7 @@ Language: **C# 14 / .NET 10** (nullable enabled). Renderer: **MonoGame DesktopGL
 Solution layout (`src/`):
 
 1. `Swtor.Formats`: class library, no I/O dependency on MonoGame. One folder per format: `Gr2` (Granny meshes and skeleton), `Dds`/`Tex` (textures), `Clo`, `Xml` (slot `index.xml`, materials), `Gom` (`systemgenerated/*.node` prototypes). Input is `ReadOnlySpan<byte>` or `Stream`.
-2. `Swtor.Assets`: asset catalog. Scans the tree once, writes a binary/JSON index cache, resolves a part id to files. Reads the root from env `SWTOR_ASSETS`, never from a hard-coded path.
+2. `Swtor.Assets`: asset catalog. Scans the tree once, writes a binary/JSON index cache, resolves a part id to files. Reads the root from env `SWTOR_ASSETS`, never from a hard-coded path. The viewer falls back to the folder saved in `%LOCALAPPDATA%\SwtorCharacterMaker\assets_root.txt`, and opens the "Open asset folder" dialog at start when neither exists.
 3. `Swtor.App`: MonoGame viewer and editor. Converts parsed meshes to `VertexBuffer`/`IndexBuffer`, skinned on the GPU with a custom `Effect`, part slots, color tints.
 4. `Swtor.Tests`: xUnit. Uses small fixture files only.
 5. `Swtor.Cli`: debug commands (`gr2 info <file>`, `gr2 survey [root]`). Use it to check parsers against the full tree.

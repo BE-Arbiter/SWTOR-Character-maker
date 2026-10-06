@@ -72,6 +72,7 @@ public sealed partial class ViewerGame : Game
     private bool _openFolderRequested;
     private bool _popupOpen = true;
     private string _folderInput = "";
+    private Task<string?>? _pickedFolder;
 
     public ViewerGame(string? initialModel = null, string? initialScheme = null, bool startOnCharacter = false,
         IEnumerable<(string Slot, string ArtName)>? equipment = null, string? loadPath = null, string? weaponKey = null, string? glmPath = null, bool startOnJka = false)
@@ -134,8 +135,13 @@ public sealed partial class ViewerGame : Game
         if (_startupWeapon is not null) _weapons.SelectByKey(_startupWeapon);
         if (_startupGlm is not null) JkaModelView.Load(_preview, GraphicsDevice, _startupGlm, _jkaTextures);
 
-        _folderInput = Environment.GetEnvironmentVariable("SWTOR_ASSETS") ?? @"C:\jka_tor_assets\resources";
-        StartIndexing(_folderInput, rescan: false);
+        _folderInput = ResolveAssetRoot();
+        if (Directory.Exists(_folderInput)) StartIndexing(_folderInput, rescan: false);
+        else
+        {
+            _explorer.Status = "No asset folder yet.";
+            _openFolderRequested = true;
+        }
         base.Initialize();
     }
 
@@ -230,6 +236,28 @@ public sealed partial class ViewerGame : Game
         base.UnloadContent();
     }
 
+    private static readonly string RootSettingFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SwtorCharacterMaker", "assets_root.txt");
+
+    // Order: SWTOR_ASSETS, then the folder saved by the last successful open. Returns "" when none is set.
+    private static string ResolveAssetRoot()
+    {
+        string? env = Environment.GetEnvironmentVariable("SWTOR_ASSETS");
+        if (!string.IsNullOrWhiteSpace(env)) return env;
+        try { return File.Exists(RootSettingFile) ? File.ReadAllText(RootSettingFile).Trim() : ""; }
+        catch (IOException) { return ""; }
+    }
+
+    private static void SaveAssetRoot(string root)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(RootSettingFile)!);
+            File.WriteAllText(RootSettingFile, root);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
     private void StartIndexing(string root, bool rescan)
     {
         if (!Directory.Exists(root))
@@ -238,6 +266,7 @@ public sealed partial class ViewerGame : Game
             return;
         }
         _root = root;
+        SaveAssetRoot(root);
         _scanning = true;
         _scanned = 0;
         _indexError = null;
@@ -330,6 +359,15 @@ public sealed partial class ViewerGame : Game
         ImGui.Text("Path to the extracted game folder (the one with art/, gamedata/, ...)");
         ImGui.SetNextItemWidth(600);
         ImGui.InputText("##path", ref _folderInput, 512);
+        ImGui.SameLine();
+        if (_pickedFolder is { IsCompleted: true } picked)
+        {
+            _pickedFolder = null;
+            if (picked.IsCompletedSuccessfully && picked.Result is { } chosen) _folderInput = chosen;
+        }
+        ImGui.BeginDisabled(_pickedFolder is not null);
+        if (ImGui.Button("Browse...")) _pickedFolder = FolderPicker.PickAsync("Select the extracted game folder (with art, gamedata, ...)");
+        ImGui.EndDisabled();
         bool exists = Directory.Exists(_folderInput);
         if (!exists) ImGui.TextColored(ErrorColor, "Folder not found");
         if (ImGui.Button("Open") && exists)
