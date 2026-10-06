@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "0 2 * * *" # nightly, 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      IS_NIGHTLY: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip nightly when nothing changed
+        id: changed
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: |
+          if git rev-parse -q --verify refs/tags/nightly >/dev/null \
+             && [ "$(git rev-parse 'nightly^{commit}')" = "$(git rev-parse HEAD)" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.changed.outputs.skip != 'true'
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        if: steps.changed.outputs.skip != 'true'
+        run: dotnet test -c Release
+
+      - name: Version
+        if: steps.changed.outputs.skip != 'true'
+        id: ver
+        shell: bash
+        run: |
+          if [ "$IS_NIGHTLY" = "true" ]; then
+            echo "version=0.0.0-nightly.$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+            echo "name=nightly-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "name=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish
+        if: steps.changed.outputs.skip != 'true'
+        shell: bash
+        run: |
+          for p in Swtor.App Swtor.Cli; do
+            dotnet publish "src/$p" -c Release -r win-x64 --self-contained \
+              -p:Version=${{ steps.ver.outputs.version }} -o publish/swtor
+          done
+          7z a "SWTOR-Character-Maker-${{ steps.ver.outputs.name }}-win-x64.zip" ./publish/swtor/*
+
+      - name: Publish tagged release
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" *.zip --generate-notes --title "$GITHUB_REF_NAME"
+
+      - name: Publish nightly release
+        if: github.event_name != 'push' && steps.changed.outputs.skip != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly *.zip --prerelease --target "$GITHUB_SHA" \
+            --title "Nightly $(date -u +%Y-%m-%d)" \
+            --notes "Automatic build of commit $GITHUB_SHA. May be unstable."
