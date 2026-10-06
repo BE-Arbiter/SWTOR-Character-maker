@@ -1,39 +1,39 @@
 # SWTOR Character Maker
 
-Outil Windows pour parcourir les personnages et objets de Star Wars: The Old Republic (SWTOR), composer un personnage à partir des pièces du jeu (race, corps, tête, cheveux, armure, couleurs) et l'exporter vers un modèle Jedi Academy (`.glm`).
+Windows tool to browse Star Wars: The Old Republic (SWTOR) characters and items, build a character from game parts (race, body, head, hair, armor, colors), and export it to a Jedi Academy model (`.glm`).
 
-Ce dépôt ne contient **aucun fichier du jeu**. Il lit une copie extraite des assets, que vous devez produire vous-même à partir de votre propre installation de SWTOR.
+This repository contains **no game files**. It reads an extracted copy of the game assets, which you must produce yourself from your own SWTOR installation.
 
-## Prérequis
+## Prerequisites
 
 - Windows 10/11.
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) (seulement pour compiler; les releases sont autonomes).
-- Une copie installée de SWTOR (les archives `Assets\swtor_*.tor`, environ 58 Go).
-- Les assets extraits (voir ci-dessous): plusieurs centaines de milliers de fichiers. Prévoir de la place disque.
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) (only to build from source; releases are self-contained).
+- An installed copy of SWTOR (the `Assets\swtor_*.tor` archives, about 58 GB).
+- The extracted assets (see below): several hundred thousand files, so plan for disk space.
 
-## Extraire les assets
+## Extracting the assets
 
-Le jeu stocke ses fichiers dans des archives `.tor`. Il faut les extraire dans un dossier, par exemple `C:\jka_tor_assets\resources`.
+The game keeps its files in `.tor` archives. You must extract them to a folder, for example `C:\jka_tor_assets\resources`.
 
-1. Téléchargez [extracTOR](https://github.com/UltimaKaosXIII/extracTOR) et suivez ses instructions.
-2. Pointez-le vers votre copie de SWTOR et extrayez les ressources dans un dossier de travail.
-3. Le dossier obtenu doit contenir `art`, `gamedata`, `systemgenerated`, `fr-fr`, etc. Ce dossier est la racine des assets.
+1. Download [extracTOR](https://github.com/UltimaKaosXIII/extracTOR) and follow its instructions.
+2. Point it at your SWTOR copy and extract the resources to a working folder.
+3. The result must contain `art`, `gamedata`, `systemgenerated`, `fr-fr`, and so on. This folder is the asset root.
 
-Alternative: la CLI de ce dépôt sait aussi lire les `.tor` (`swtor tor list`, `swtor tor extract <sortie> [dossier] --tree <racine> --names <liste>`). Les archives ne contiennent que des hash de chemins: il faut un arbre déjà extrait ou une liste de noms pour retrouver les noms de fichiers.
+Alternative: the CLI of this repository can also read `.tor` files (`swtor tor list`, `swtor tor extract <out> [folder] --tree <root> --names <list>`). The archives store only path hashes, so you need an already extracted tree or a list of names to recover the file names.
 
 ## Configuration
 
-Indiquez la racine des assets avec la variable d'environnement `SWTOR_ASSETS`:
+Set the asset root with the `SWTOR_ASSETS` environment variable:
 
 ```powershell
 $env:SWTOR_ASSETS = "C:\jka_tor_assets\resources"
 ```
 
-Au premier lancement, l'application scanne l'arbre et écrit un index en cache dans `%LOCALAPPDATA%\SwtorCharacterMaker` (environ 5 s). Les lancements suivants utilisent le cache.
+On first start, the app scans the tree and writes an index cache to `%LOCALAPPDATA%\SwtorCharacterMaker` (about 5 s). Later starts use the cache.
 
-## Lancer
+## Running
 
-Depuis une release (zip `win-x64`), lancez `Swtor.App.exe`. Depuis les sources:
+From a release (`win-x64` zip), run `Swtor.App.exe`. From source:
 
 ```bash
 dotnet build
@@ -41,27 +41,27 @@ dotnet test
 dotnet run --project src/Swtor.App -- --character
 ```
 
-Autres options utiles: `<fichier.gr2>` pour voir un modèle, `--load perso.json` pour charger un personnage, `--jka` pour l'onglet Jedi Academy.
+Other useful options: `<file.gr2>` to view a model, `--load character.json` to load a saved character, `--jka` to open the Jedi Academy tab.
 
-## Contenu du dépôt
+## Repository layout
 
-| Projet | Rôle |
+| Project | Role |
 | --- | --- |
-| `Swtor.Formats` | Lecteurs de formats (GR2 « GAWB », DDS, GOM, MYP/.tor, GLM/GLA). Aucune dépendance à MonoGame. |
-| `Swtor.Assets` | Catalogue des assets: index en cache, apparences, couleurs, objets, base GOM, export Jedi Academy. |
-| `Swtor.App` | Visionneuse MonoGame (DesktopGL) avec panneaux Dear ImGui. |
-| `Swtor.Cli` | Commandes de debug: `gr2 survey`, `gom survey`, `tor list/extract`, `jka ...`. |
-| `Swtor.Tests` | Tests xUnit. Ils n'utilisent que de petits fichiers dans `tests/fixtures`. |
+| `Swtor.Formats` | Format readers (GR2 "GAWB", DDS, GOM, MYP/.tor, GLM/GLA). No MonoGame dependency. |
+| `Swtor.Assets` | Asset catalog: cached index, appearances, colors, items, GOM database, Jedi Academy export. |
+| `Swtor.App` | MonoGame (DesktopGL) viewer with Dear ImGui panels. |
+| `Swtor.Cli` | Debug commands: `gr2 survey`, `gom survey`, `tor list/extract`, `jka ...`. |
+| `Swtor.Tests` | xUnit tests. They use only small files in `tests/fixtures`. |
 
-Les détails du fonctionnement (formats, structure des assets, conventions) sont dans [CLAUDE.md](CLAUDE.md).
+Implementation details (formats, asset tree structure, conventions) are in [CLAUDE.md](CLAUDE.md).
 
 ## Releases
 
-- Un tag `v*` publie une release avec un zip autonome (`win-x64`).
-- Une build `nightly` (pré-release) est publiée chaque nuit si `main` a changé.
+- A `v*` tag publishes a release with a self-contained `win-x64` zip.
+- A `nightly` pre-release is published every night if `main` changed.
 
-Ces zips ne contiennent pas les assets du jeu: il faut les extraire comme décrit plus haut.
+The zips do not contain the game assets: extract them as described above.
 
-## Mentions
+## Disclaimer
 
-SWTOR et Star Wars appartiennent à leurs propriétaires respectifs. Ce projet n'est pas affilié à BioWare, EA ou Lucasfilm. Il ne distribue aucun asset du jeu.
+SWTOR and Star Wars belong to their respective owners. This project is not affiliated with BioWare, EA or Lucasfilm. It does not distribute any game asset.
