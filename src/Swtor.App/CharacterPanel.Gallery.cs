@@ -66,14 +66,14 @@ public sealed partial class CharacterPanel
 
         int picked = -2; // -2 nothing, -1 the empty slot, otherwise a position in the list
         ImGui.BeginChild("##gallerygrid", new Vector2(0, -ImGui.GetFrameHeightWithSpacing()), true);
-        picked = DrawGrid(shown, current?.Asset, none);
+        picked = DrawGrid(shown, current?.Asset, none, filter);
         ImGui.EndChild();
 
         if (ImGui.Button("Close", new Vector2(120, 0)) || !open) ImGui.CloseCurrentPopup();
         if (picked != -2)
         {
             if (picked < 0) _equipment.Remove(slot);
-            else _equipment[slot] = new EquipChoice(shown[picked].Asset);
+            else _equipment[slot] = ChoiceFor(shown[picked], filter);
             ImGui.CloseCurrentPopup();
             Rebuild();
         }
@@ -81,12 +81,12 @@ public sealed partial class CharacterPanel
     }
 
     // The grid of tiles. Only the rows that show are drawn. The first tile is the empty slot. Returns the clicked tile (see DrawGallery).
-    private int DrawGrid(List<EquipEntry> shown, AppearanceAsset? current, string none)
+    private int DrawGrid(List<EquipEntry> shown, AppearanceAsset? current, string none, string filter)
     {
         var spacing = new Vector2(6, 6);
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, spacing);
         float tileWidth = IconSize + 16;
-        float tileHeight = IconSize + 12 + ImGui.GetTextLineHeight() * 3;
+        float tileHeight = IconSize + 12 + ImGui.GetTextLineHeight() * 7; // The name (up to 3 lines) and the variant (up to 4 lines).
         int columns = Math.Max(1, (int)((ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ScrollbarSize) / (tileWidth + spacing.X)));
         int total = shown.Count + 1;
         int rows = (total + columns - 1) / columns;
@@ -105,7 +105,7 @@ public sealed partial class CharacterPanel
                 if (column > 0) ImGui.SameLine();
                 bool clicked = tile == 0
                     ? DrawTile(0, null, none, none, current is null, tileWidth, tileHeight)
-                    : DrawTile(tile, shown[tile - 1], GalleryName(shown[tile - 1]), GalleryTooltip(shown[tile - 1]), shown[tile - 1].Asset == current, tileWidth, tileHeight);
+                    : DrawTile(tile, shown[tile - 1], GalleryName(shown[tile - 1]), GalleryTooltip(shown[tile - 1]), shown[tile - 1].Asset == current, tileWidth, tileHeight, VariantMatch(shown[tile - 1], filter));
                 if (clicked) picked = tile - 1;
             }
         if (last < rows - 1) ImGui.Dummy(new Vector2(1, (rows - 1 - last) * rowStep - spacing.Y));
@@ -113,12 +113,12 @@ public sealed partial class CharacterPanel
         return picked;
     }
 
-    private bool DrawTile(int id, EquipEntry? entry, string name, string tooltip, bool selected, float width, float height)
+    private bool DrawTile(int id, EquipEntry? entry, string name, string tooltip, bool selected, float width, float height, ItemInfo? variant = null)
     {
         ImGui.BeginChild($"##tile{id}", new Vector2(width, height), false, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
         if (selected) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.45f, 0.85f, 1f));
         var size = new Vector2(IconSize, IconSize);
-        IntPtr icon = entry is null ? IntPtr.Zero : IconFor(entry);
+        IntPtr icon = entry is null ? IntPtr.Zero : IconFor(entry, variant);
         bool clicked = icon != IntPtr.Zero
             ? ImGui.ImageButton($"##img{id}", icon, size)
             : ImGui.Button(entry is null ? "-" : "?", size + new Vector2(8, 8));
@@ -126,6 +126,8 @@ public sealed partial class CharacterPanel
         if (ImGui.IsItemHovered() && tooltip.Length > 0) ImGui.SetTooltip(tooltip);
         ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + IconSize + 8);
         ImGui.TextWrapped(name);
+        // A variant found by its name: the asset name above in white, the variant below in grey.
+        if (variant is not null) ImGui.TextDisabled($"-> {variant.Name}");
         ImGui.PopTextWrapPos();
         ImGui.EndChild();
         return clicked;
@@ -139,16 +141,18 @@ public sealed partial class CharacterPanel
 
     // The icon of an entry as an ImGui texture id, or zero. The icon is the one of the first item that has a file.
     // At most a few icons are read in a frame: the others show a placeholder and come in the next frames.
-    private IntPtr IconFor(EquipEntry entry)
+    private IntPtr IconFor(EquipEntry entry, ItemInfo? variant = null)
     {
         long key = long.Parse(entry.Asset.Id, System.Globalization.CultureInfo.InvariantCulture);
+        // A variant has the icon of its own item: the cache key adds a hash of the item key.
+        if (variant is not null) key |= (long)(uint)variant.Key.GetHashCode() << 32;
         if (_icons.TryGetValue(key, out var cached)) return cached.Id;
         if (_gui is null || _index is null || _iconBudget <= 0) return IntPtr.Zero;
         _iconBudget--;
 
         Texture2D? texture = null;
         IntPtr id = IntPtr.Zero;
-        foreach (var item in entry.Items.Take(12))
+        foreach (var item in variant is null ? entry.Items.Take(12) : entry.Items.Where(i => i == variant).Concat(entry.Items.Take(12)))
         {
             if (item.IconPath is not { } relative) continue;
             string path = _index.FullPath(relative);

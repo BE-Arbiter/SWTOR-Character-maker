@@ -56,10 +56,12 @@ public sealed partial class ViewerGame : Game
     private List<string> _textureResults = [];
 
     // Character creator and the game database. The database opens on a background thread.
-    private enum ActiveTab { None, Model, Character, Weapons, JediAcademy }
+    private enum ActiveTab { None, Model, Character, Npc, Weapons, JediAcademy }
     private CharacterPanel _character = null!;
     private WeaponPanel _weapons = null!;
     private JkaPanel _jka = null!;
+    private NpcPanel _npc = null!;
+    private volatile NpcCatalog? _readyNpcs;
     private volatile WeaponCatalog? _readyWeapons;
     private volatile ItemCatalog? _readyItems;
     private ActiveTab _activeTab = ActiveTab.Model;
@@ -68,6 +70,12 @@ public sealed partial class ViewerGame : Game
     private volatile CharacterCatalog? _readyCatalog;
     private volatile GomDatabase? _readyGom;
     private volatile string? _gomError;
+    private volatile bool _gomErrorPopupRequested;
+    private bool _gomErrorOpen = true;
+    private volatile string _gomStage = "";
+    private volatile float _gomProgress;
+    private bool _gomLoadingRequested;
+    private bool _gomLoadingOpen = true;
 
     private bool _openFolderRequested;
     private bool _popupOpen = true;
@@ -108,6 +116,20 @@ public sealed partial class ViewerGame : Game
     private readonly string? _startupLoadPath, _startupWeapon, _startupGlm;
     private readonly List<Texture2D> _jkaTextures = [];
     private bool _showWeaponsTab;
+    private bool _showNpcTab;
+
+    /// <summary>Text of an NPC to show at start (the first match of the NPC tab). For tests.</summary>
+    public string? StartupNpc
+    {
+        get => _startupNpc;
+        set
+        {
+            _startupNpc = value;
+            _showNpcTab = value is not null;
+        }
+    }
+
+    private string? _startupNpc;
 
     // Save and load dialogs.
     private enum FileDialog { None, Save, Load }
@@ -130,6 +152,7 @@ public sealed partial class ViewerGame : Game
         _character.SetGui(_gui);
         _weapons = new WeaponPanel(GraphicsDevice, _preview);
         _jka = new JkaPanel(GraphicsDevice, _preview, _character);
+        _npc = new NpcPanel(_character, _jka);
         if (_startupEquipment is not null) _character.SetStartupEquipment(_startupEquipment);
         if (_startupLoadPath is not null) LoadCharacter(_startupLoadPath);
         if (_startupWeapon is not null) _weapons.SelectByKey(_startupWeapon);
@@ -172,6 +195,14 @@ public sealed partial class ViewerGame : Game
             _readyItems = null;
             _character.SetItems(itemCatalog);
             _weapons.SetItems(itemCatalog);
+        }
+        if (_readyNpcs is { } npcCatalog)
+        {
+            _readyNpcs = null;
+            _npc.SetData(npcCatalog);
+            if (_startupNpc is not null) _npc.SelectByText(_startupNpc);
+            _startupNpc = null;
+            if (_activeTab == ActiveTab.Npc) _npc.Activate();
         }
         if (_readyWeapons is { } weaponCatalog)
         {
@@ -223,6 +254,8 @@ public sealed partial class ViewerGame : Game
         // The 3D view goes first. ImGui draws on top of it in AfterLayout.
         _preview.Draw(_previewArea);
         DrawOpenFolderDialog();
+        DrawGomErrorDialog();
+        DrawGomLoadingDialog();
         DrawCharacterFileDialogs();
         _gui.AfterLayout();
         CaptureForTest();
@@ -287,19 +320,26 @@ public sealed partial class ViewerGame : Game
     private void StartGomLoading(string root)
     {
         _gomError = null;
+        _gomStage = "Reading the game objects...";
+        _gomProgress = 0;
+        var progress = new Progress<float>(f => _gomProgress = f);
         Task.Run(() =>
         {
             try
             {
-                var db = GomDatabase.Open(root);
+                var db = GomDatabase.Open(root, progress);
+                _gomStage = "Reading the items and the characters...";
                 _readyGom = db;
                 _readyWeapons = WeaponCatalog.Load(db);
                 LoadItems(db, root);
+                _readyNpcs = LoadNpcs(db, root);
                 _readyCatalog = CharacterCatalog.Load(db);
             }
-            catch (Exception e) when (e is IOException or GameFormatException or UnauthorizedAccessException)
+            catch (Exception e)
             {
-                _gomError = e.Message;
+                // Any failure must show on screen. An uncaught exception here would leave the tabs on "Loading" forever.
+                _gomError = $"{e.GetType().Name}: {e.Message}";
+                _gomErrorPopupRequested = true;
             }
         });
     }
@@ -380,6 +420,71 @@ public sealed partial class ViewerGame : Game
         ImGui.EndPopup();
     }
 
+    // Typical number of files in the asset tree (about 800,000, see CLAUDE.md). Used only for the progress estimate.
+    private const float ExpectedAssetFiles = 800_000f;
+
+    // True while the index or the game database is still being read.
+    private bool GomLoading => _gom is null && _gomError is null;
+
+    // Shown while the Character tab waits for the index and the game database. Closes itself when they are ready.
+    private void DrawGomLoadingDialog()
+    {
+        if (_gomLoadingRequested)
+        {
+            ImGui.OpenPopup("Loading the game database");
+            _gomLoadingOpen = true;
+            _gomLoadingRequested = false;
+        }
+        if (!ImGui.BeginPopupModal("Loading the game database", ref _gomLoadingOpen, ImGuiWindowFlags.AlwaysAutoResize)) return;
+
+        if (!GomLoading)
+        {
+            ImGui.CloseCurrentPopup();
+            ImGui.EndPopup();
+            return;
+        }
+        if (_index is null)
+        {
+            // The tree is not counted first (it would take too long), so the bar uses a typical file count.
+            // It stops at 99% until the scan really ends.
+            float estimate = Math.Min(_scanned / ExpectedAssetFiles, 0.99f);
+            ImGui.Text(_indexError ?? $"Indexing the asset folder... {_scanned} files seen.");
+            ImGui.ProgressBar(estimate, new Vector2(400, 0), $"{estimate * 100:0}% (estimated)");
+        }
+        else
+        {
+            ImGui.Text(_gomStage);
+            ImGui.ProgressBar(_gomProgress, new Vector2(400, 0), $"{_gomProgress * 100:0}%");
+        }
+        ImGui.EndPopup();
+    }
+
+    // Shown once for each failure of the game database. The user can pick the folder again from here.
+    private void DrawGomErrorDialog()
+    {
+        if (_gomErrorPopupRequested)
+        {
+            ImGui.OpenPopup("Game database error");
+            _gomErrorOpen = true;
+            _gomErrorPopupRequested = false;
+        }
+        if (!ImGui.BeginPopupModal("Game database error", ref _gomErrorOpen, ImGuiWindowFlags.AlwaysAutoResize)) return;
+
+        ImGui.TextWrapped("The game database could not be read from this folder:");
+        ImGui.TextColored(ErrorColor, _gomError ?? "");
+        ImGui.Spacing();
+        ImGui.TextWrapped("The folder must contain systemgenerated/ and art/ directly (the folder named resources).");
+        ImGui.Spacing();
+        if (ImGui.Button("Choose the folder again"))
+        {
+            _openFolderRequested = true;
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Close")) ImGui.CloseCurrentPopup();
+        ImGui.EndPopup();
+    }
+
     private void DrawDetails()
     {
         if (ImGui.BeginTabBar("##details"))
@@ -401,7 +506,20 @@ public sealed partial class ViewerGame : Game
             if (ImGui.BeginTabItem("Character", ref characterOpen, characterFlags))
             {
                 active = ActiveTab.Character;
-                _character.Draw();
+                if (GomLoading && _activeTab != ActiveTab.Character) _gomLoadingRequested = true;
+                if (_gomError is not null) ImGui.TextColored(ErrorColor, $"Game database error: {_gomError}");
+                else _character.Draw();
+                ImGui.EndTabItem();
+            }
+            var npcFlags = _showNpcTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            _showNpcTab = false;
+            bool npcOpen = true;
+            if (ImGui.BeginTabItem("NPC", ref npcOpen, npcFlags))
+            {
+                active = ActiveTab.Npc;
+                if (GomLoading && _activeTab != ActiveTab.Npc) _gomLoadingRequested = true;
+                if (_gomError is not null) ImGui.TextColored(ErrorColor, $"Game database error: {_gomError}");
+                else _npc.Draw();
                 ImGui.EndTabItem();
             }
             var weaponFlags = _showWeaponsTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
@@ -410,7 +528,8 @@ public sealed partial class ViewerGame : Game
             if (ImGui.BeginTabItem("Weapons", ref weaponsOpen, weaponFlags))
             {
                 active = ActiveTab.Weapons;
-                _weapons.Draw();
+                if (_gomError is not null) ImGui.TextColored(ErrorColor, $"Game database error: {_gomError}");
+                else _weapons.Draw();
                 ImGui.EndTabItem();
             }
             var jkaFlags = _showJkaTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
@@ -427,7 +546,13 @@ public sealed partial class ViewerGame : Game
             if (active != ActiveTab.None && active != _activeTab)
             {
                 _activeTab = active;
-                if (active is ActiveTab.Character or ActiveTab.JediAcademy) _character.Rebuild();
+                if (active == ActiveTab.Character)
+                {
+                    _character.LeaveNpc();
+                    _character.Rebuild();
+                }
+                else if (active == ActiveTab.JediAcademy) _character.Rebuild();
+                else if (active == ActiveTab.Npc) _npc.Activate();
                 else if (active == ActiveTab.Weapons) _weapons.Rebuild();
                 else if (_model is not null) _preview.Load(_model);
                 if (active == ActiveTab.Model && _baseImage is not null) RebuildTexture();

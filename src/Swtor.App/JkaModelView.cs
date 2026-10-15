@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Numerics;
 using Microsoft.Xna.Framework.Graphics;
 using Swtor.Formats;
 using Swtor.Formats.Dds;
@@ -22,6 +24,8 @@ public static class JkaModelView
         var skin = ReadSkin(folder);
         var byFile = new Dictionary<string, Texture2D?>(StringComparer.OrdinalIgnoreCase);
 
+        var pose = TestPose(Environment.GetEnvironmentVariable("SWTOR_POSE"));
+
         preview.Clear();
         for (int i = 0; i < model.Surfaces.Count; i++)
         {
@@ -32,9 +36,45 @@ public static class JkaModelView
 
             string shader = skin.Get(info.Name) ?? info.Shader;
             if (!byFile.TryGetValue(shader, out var texture)) byFile[shader] = texture = LoadTexture(device, folder, shader, textures);
-            preview.Add(ToGr2(info.Name, geometry), texture);
+            preview.Add(ToGr2(info.Name, geometry, pose), texture);
         }
         preview.Frame();
+    }
+
+    /// <summary>
+    /// Test pose for skinning checks (env <c>SWTOR_POSE</c>). Input: <c>bone=x,y,z;bone=x,y,z</c>, angles in degrees around the
+    /// Jedi Academy axes (x left, y back, z up), each turn around the bind pose origin of the bone. Children follow their parent.
+    /// Output: one model space matrix per bone of <see cref="GlaSkeleton.Humanoid"/>, or null when the text is empty.
+    /// </summary>
+    private static Matrix4x4[]? TestPose(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var skeleton = GlaSkeleton.Humanoid;
+        var local = new Matrix4x4[skeleton.Bones.Count];
+        Array.Fill(local, Matrix4x4.Identity);
+        foreach (string item in text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = item.Split('=');
+            int bone = parts.Length == 2 ? skeleton.IndexOf(parts[0]) : -1;
+            var angles = parts.Length == 2 ? parts[1].Split(',').Select(a => float.Parse(a, CultureInfo.InvariantCulture) * MathF.PI / 180).ToArray() : [];
+            if (bone < 0 || angles.Length != 3) throw new FormatException($"SWTOR_POSE: bad item \"{item}\" (expected bone=x,y,z).");
+            var origin = skeleton.Bones[bone].Origin;
+            local[bone] = Matrix4x4.CreateTranslation(-origin)
+                * Matrix4x4.CreateRotationX(angles[0]) * Matrix4x4.CreateRotationY(angles[1]) * Matrix4x4.CreateRotationZ(angles[2])
+                * Matrix4x4.CreateTranslation(origin);
+        }
+        // Parents come before their children in the bone list, except the face bones (parent "face", the last bone).
+        var world = new Matrix4x4[local.Length];
+        var done = new bool[local.Length];
+        for (int pass = 0; pass < 2; pass++)
+            for (int i = 0; i < local.Length; i++)
+            {
+                int parent = skeleton.Bones[i].Parent;
+                if (done[i] || (parent >= 0 && !done[parent])) continue;
+                world[i] = parent < 0 ? local[i] : local[i] * world[parent];
+                done[i] = true;
+            }
+        return world;
     }
 
     private static SkinFile ReadSkin(string folder)
@@ -73,7 +113,7 @@ public static class JkaModelView
     }
 
     // Jedi Academy: x left, y back, z up. The preview: x left, y up, z front. Both are right handed.
-    private static Gr2Model ToGr2(string name, GlmSurface surface)
+    private static Gr2Model ToGr2(string name, GlmSurface surface, Matrix4x4[]? pose)
     {
         int count = surface.Vertices.Length;
         var positions = new Vec3[count];
@@ -82,8 +122,22 @@ public static class JkaModelView
         for (int i = 0; i < count; i++)
         {
             var v = surface.Vertices[i];
-            positions[i] = new Vec3(v.Position.X, v.Position.Z, -v.Position.Y);
-            normals[i] = new Vec3(v.Normal.X, v.Normal.Z, -v.Normal.Y);
+            var p = v.Position;
+            var n = v.Normal;
+            if (pose is not null)
+            {
+                p = Vec3.Zero;
+                n = Vec3.Zero;
+                foreach (var w in v.Weights)
+                {
+                    if (w.Bone < 0 || w.Bone >= pose.Length) continue;
+                    p += w.Weight * Vec3.Transform(v.Position, pose[w.Bone]);
+                    n += w.Weight * Vec3.TransformNormal(v.Normal, pose[w.Bone]);
+                }
+                if (n.LengthSquared() > 1e-12f) n = Vec3.Normalize(n);
+            }
+            positions[i] = new Vec3(p.X, p.Z, -p.Y);
+            normals[i] = new Vec3(n.X, n.Z, -n.Y);
             uvs[i] = v.Uv;
         }
         var mesh = new Gr2Mesh

@@ -114,9 +114,22 @@ public sealed partial class CharacterPanel
                     ImGui.TextDisabled("... use the filter");
                     break;
                 }
-                if (ImGui.Selectable($"{EntryLabel(entry)}##{entry.Asset.Id}", entry.Asset == choice?.Asset))
+                // A variant found by its name gets a second, grey line: the asset above, the variant below.
+                var variantItem = VariantMatch(entry, filter);
+                var lineStart = ImGui.GetCursorPos();
+                float lineHeight = ImGui.GetTextLineHeightWithSpacing();
+                bool clicked = ImGui.Selectable($"{EntryLabel(entry)}##{entry.Asset.Id}", entry.Asset == choice?.Asset, ImGuiSelectableFlags.None,
+                    new System.Numerics.Vector2(0, variantItem is null ? 0 : lineHeight * 2));
+                if (variantItem is not null)
                 {
-                    _equipment[slot] = new EquipChoice(entry.Asset);
+                    var lineEnd = ImGui.GetCursorPos();
+                    ImGui.SetCursorPos(new System.Numerics.Vector2(lineStart.X + 16, lineStart.Y + lineHeight));
+                    ImGui.TextDisabled($"-> {variantItem.Name}  (level {variantItem.Level})");
+                    ImGui.SetCursorPos(lineEnd);
+                }
+                if (clicked)
+                {
+                    _equipment[slot] = ChoiceFor(entry, filter);
                     Rebuild();
                 }
                 if (ImGui.IsItemHovered() && entry.Items.Count > 0) ImGui.SetTooltip(ItemsTooltip(entry));
@@ -159,7 +172,7 @@ public sealed partial class CharacterPanel
         var shown = FilterEntries(options, filter);
         int at = Stepper.Move(shown.Count, choice is null ? -1 : shown.FindIndex(e => e.Asset == choice.Asset), step, true);
         if (at < 0) _equipment.Remove(slot);
-        else _equipment[slot] = new EquipChoice(shown[at].Asset);
+        else _equipment[slot] = ChoiceFor(shown[at], filter);
         Rebuild();
     }
 
@@ -498,6 +511,21 @@ public sealed partial class CharacterPanel
             _ => entries.OrderBy(e => e.Items.Count == 0).ThenBy(e => e.Items.Count > 0 ? e.Items[0].Name : e.Asset.ArtName, StringComparer.CurrentCultureIgnoreCase),
         };
         return _equipOptions[key] = ordered.ToList();
+    }
+
+    // Equips an entry with the material variant of an item. An asset is shared by many items with different looks
+    // (the "Veste de soldat imperial" is a variant of an asset that is first named after another item).
+    // The item is the first one that matches the name filter, otherwise the first item of the asset.
+    // The first item of the entry whose name matches the filter and that is not the item named in the main label. Null if none.
+    private static ItemInfo? VariantMatch(EquipEntry entry, string filter) =>
+        filter.Length == 0 || entry.Items.Count == 0 ? null
+            : entry.Items.FirstOrDefault(i => i.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) && i.Name != entry.Items[0].Name);
+
+    private static EquipChoice ChoiceFor(EquipEntry entry, string filter)
+    {
+        var item = VariantMatch(entry, filter) ?? (entry.Items.Count > 0 ? entry.Items[0] : null);
+        int variant = item is null ? 0 : entry.Asset.Materials.ToList().FindIndex(m => m.Id == item.MaterialId.ToString(CultureInfo.InvariantCulture));
+        return new EquipChoice(entry.Asset) { Variant = Math.Max(0, variant) };
     }
 
     private EquipEntry MakeEntry(AppearanceAsset asset)

@@ -206,14 +206,40 @@ public sealed class JkaPanel
         _customTarget.Length > 0 ? (File.Exists(_customTarget) ? _customTarget : null)
         : _models.Count == 0 ? null : Path.Combine(_playersFolder, _models[Math.Clamp(_target, 0, _models.Count - 1)], "model.glm");
 
-    private void StartExport(List<string> slots)
+    /// <summary>True while an export runs on a background thread.</summary>
+    public bool Busy => _task is not null;
+
+    /// <summary>Result text of the last export (or its error), and the folder name of the last model.</summary>
+    public string? Message => _message;
+
+    public bool MessageIsError => _messageIsError;
+
+    /// <summary>The folder where new models are written.</summary>
+    public string PlayersFolder => _playersFolder;
+
+    /// <summary>Why a quick export cannot start now, or null when it can.</summary>
+    public string? QuickExportProblem() =>
+        !IsUsableFolder(_playersFolder) ? "The players folder of the Jedi Academy tab is not valid."
+        : _index is null ? "The asset index is not loaded yet."
+        : _task is not null ? "An export is running."
+        : _character.AvailableExportSlots.Any() ? null : "Nothing to export.";
+
+    /// <summary>Exports every part of the shown character as a new model <paramref name="name"/> with the settings of this tab. Returns false when it cannot start.</summary>
+    public bool ExportNew(string name)
+    {
+        if (QuickExportProblem() is not null) return false;
+        StartExport(_character.AvailableExportSlots.ToList(), name);
+        return true;
+    }
+
+    private void StartExport(List<string> slots, string? quickName = null)
     {
         var parts = _character.ExportParts(slots);
         var save = _character.ToSave();
         var index = _index!;
         string players = _playersFolder;
-        bool add = _addMode;
-        string name = _newName, prefix = _addPrefix, skin = _skinName.Trim();
+        bool add = _addMode && quickName is null;
+        string name = quickName ?? _newName, prefix = _addPrefix, skin = _skinName.Trim();
         string? target = SelectedModel();
         int size = _textureSize;
         int vertexBudget = _unlimitedVertices ? 0 : JkaConverter.MaxTotalVertices;
@@ -222,6 +248,9 @@ public sealed class JkaPanel
             ? JkaExporter.AddToModel(index, parts, target!, new JkaExportOptions { PlayersFolder = players, TexturePrefix = prefix, MaxTextureSize = size, MaxTotalVertices = vertexBudget, SkinName = skin, Character = save })
             : JkaExporter.CreateNew(index, parts, name, new JkaExportOptions { PlayersFolder = players, MaxTextureSize = size, MaxTotalVertices = vertexBudget, Character = save }));
     }
+
+    /// <summary>Collects the result of a finished export. Call it every frame while an export can run.</summary>
+    public void Poll() => PollTask();
 
     private void PollTask()
     {

@@ -95,6 +95,13 @@ public static class JkaConverter
         var targets = mesh.Bones.Select(b => JkaBoneMap.Map(b.Name)
             .Select(t => (Index: jka.IndexOf(t.Bone), t.Fraction)).Where(t => t.Index >= 0).ToArray()).ToArray();
 
+        // Below the hips, the weight of the pelvis and of bones without counterpart (robe skirt and cloth bones) is shared
+        // between the pelvis and the two legs (JkaRetarget.LegShare), so that a skirt follows the legs.
+        int pelvis = jka.IndexOf("pelvis");
+        var legBones = new[] { (Thigh: jka.IndexOf("lfemurYZ"), Shin: jka.IndexOf("ltibia")), (Thigh: jka.IndexOf("rfemurYZ"), Shin: jka.IndexOf("rtibia")) };
+        bool canShare = pelvis >= 0 && legBones.All(l => l.Thigh >= 0 && l.Shin >= 0);
+        var pelvisOrNone = targets.Select(t => t.Length == 0 || (t.Length == 1 && t[0].Index == pelvis)).ToArray();
+
         var weights = new GlmWeight[mesh.VertexCount][];
         var accumulated = new Dictionary<int, float>();
         for (int v = 0; v < mesh.VertexCount; v++)
@@ -102,14 +109,30 @@ public static class JkaConverter
             accumulated.Clear();
             if (mesh.BoneWeights is not null && mesh.BoneIndices is not null)
             {
+                var share = canShare ? retarget.LegShare(mesh.Positions[v]) : null;
                 var w4 = mesh.BoneWeights[v];
                 for (int k = 0; k < 4; k++)
                 {
                     float w = k switch { 0 => w4.X, 1 => w4.Y, 2 => w4.Z, _ => w4.W };
                     if (w <= 0) continue;
-                    foreach (var (index, fraction) in targets[mesh.BoneIndices[v * 4 + k]])
+                    int bone = mesh.BoneIndices[v * 4 + k];
+                    if (share is { } s && pelvisOrNone[bone])
+                    {
+                        float toLeg = w * s.Share;
+                        accumulated[pelvis] = accumulated.GetValueOrDefault(pelvis) + w - toLeg;
+                        for (int side = 0; side < 2; side++)
+                        {
+                            var leg = legBones[side];
+                            float toSide = toLeg * (side == 0 ? s.Left : 1 - s.Left);
+                            accumulated[leg.Thigh] = accumulated.GetValueOrDefault(leg.Thigh) + toSide * (1 - s.Shin);
+                            accumulated[leg.Shin] = accumulated.GetValueOrDefault(leg.Shin) + toSide * s.Shin;
+                        }
+                        continue;
+                    }
+                    foreach (var (index, fraction) in targets[bone])
                         accumulated[index] = accumulated.GetValueOrDefault(index) + w * fraction;
                 }
+                foreach (int key in accumulated.Where(a => a.Value <= 0).Select(a => a.Key).ToList()) accumulated.Remove(key);
             }
             weights[v] = accumulated.Count == 0 ? [new GlmWeight(NearestBone(positions[v], jka), 1f)] : Normalize(accumulated);
         }
@@ -126,12 +149,18 @@ public static class JkaConverter
         return sorted.Select(w => new GlmWeight(w.Key, w.Value / total)).ToArray();
     }
 
+    // The fallback bone of a vertex without weight: the nearest bone origin of FallbackBones.
+    // Above the hip joints, the leg bones are skipped. At the side of the hips their origin is nearer than the pelvis, so the top of
+    // a robe skirt (cloth bones only) followed the thigh fully while the robe just below stayed on the pelvis: the skirt tore open.
     private static int NearestBone(Vector3 p, GlaSkeleton jka)
     {
         int best = 0;
         float bestDistance = float.MaxValue;
+        int hip = jka.IndexOf("lfemurYZ");
+        bool aboveHips = hip >= 0 && p.Z > jka.Bones[hip].Origin.Z;
         foreach (string name in FallbackBones)
         {
+            if (aboveHips && IsLegBone(name)) continue;
             int index = jka.IndexOf(name);
             if (index < 0) continue;
             float d = Vector3.DistanceSquared(p, jka.Bones[index].Origin);
@@ -139,6 +168,8 @@ public static class JkaConverter
         }
         return best;
     }
+
+    private static bool IsLegBone(string name) => name.Contains("femur") || name.Contains("tibia") || name.Contains("talus");
 
     private static List<JkaSurfaceDraft> ConvertPiece(JkaSourcePiece piece, MeshData data, GlaSkeleton jka)
     {

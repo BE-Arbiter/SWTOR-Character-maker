@@ -33,6 +33,16 @@ if (args.Length >= 1 && args[0] == "items")
     var itemNames = Swtor.Formats.Stb.StringTable.Parse(File.ReadAllBytes(stbPath));
     var catalog = Swtor.Assets.ItemCatalog.Load(itemDb, itemNames);
     Console.WriteLine($"{itemNames.Count} texts, {catalog.Count} items with an appearance in {sw.Elapsed}");
+    if (args.Length >= 3 && args[1] == "find")
+    {
+        // items find <text>: items whose name contains the text, with the asset they show.
+        var findIndex = Swtor.Assets.AssetIndex.Load(DefaultRoot());
+        foreach (string slot in new[] { "face", "chest", "hand", "leg", "boot", "waist", "bracer" })
+            foreach (var asset in findIndex.Appearances.AssetsOfSlot(slot))
+                foreach (var item in catalog.ForAsset(long.Parse(asset.Id)).Where(i => i.Name.Contains(args[2], StringComparison.OrdinalIgnoreCase)))
+                    Console.WriteLine($"  {slot,-6} {item.Name} (lvl {item.Level}) -> {asset.ArtName} bt=[{string.Join(',', asset.Bodytypes)}] base='{asset.BaseFile}' mats={asset.Materials.Count}");
+        return 0;
+    }
     var weaponCatalog = Swtor.Assets.WeaponCatalog.Load(itemDb);
     Console.WriteLine($"{weaponCatalog.Items.Count(w => catalog.ForWeaponKey(w.Key).Count > 0)} of {weaponCatalog.Items.Count} weapons have an item name");
     var itemIndex = Swtor.Assets.AssetIndex.Load(DefaultRoot());
@@ -56,6 +66,70 @@ if (args.Length >= 1 && args[0] == "weapons")
 
 if (args.Length >= 2 && args[0] == "char")
     return CharCommand(args);
+
+// npc list [text]: reads the NPC looks and prints the ones that match.
+if (args.Length >= 2 && args[0] == "npc" && args[1] == "list")
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var npcDb = Swtor.Assets.GomDatabase.Open(DefaultRoot());
+    string? npcStb = Swtor.Assets.TextTables.Find(DefaultRoot(), "npc.stb");
+    var npcs = Swtor.Assets.NpcCatalog.Load(npcDb, npcStb is null ? null : Swtor.Formats.Stb.StringTable.Parse(File.ReadAllBytes(npcStb)));
+    Console.WriteLine($"{npcs.Looks.Count} looks, {npcs.Looks.Count(l => l.Names.Count > 0)} with a name, in {sw.Elapsed}");
+    string filter = args.Length >= 3 ? args[2].ToLowerInvariant() : "";
+    foreach (var look in npcs.Looks.Where(l => l.SearchText.Contains(filter)).Take(25))
+        Console.WriteLine($"  {look.Label}  [{look.ShortKey}] {look.Bodytype} x{look.NpcCount}  {string.Join(", ", look.Parts.Select(p => p.Slot))}");
+    if (args.Length >= 4 && args[3] == "parts")
+    {
+        var partIndex = Swtor.Assets.AssetIndex.Load(DefaultRoot());
+        foreach (var look in npcs.Looks.Where(l => l.SearchText.Contains(filter)).Take(25))
+        {
+            Console.WriteLine($"== {look.Label} [{look.ShortKey}]");
+            foreach (var p in look.Parts)
+            {
+                var found = partIndex.Appearances.FindAsset(p.AssetId);
+                Console.WriteLine($"   {p.Slot,-10} asset {p.AssetId} mat {p.MaterialId} -> {(found is null ? "NOT FOUND" : found.Value.Slot + "/" + found.Value.Asset.ArtName + " base='" + found.Value.Asset.BaseFile + "'")}");
+            }
+        }
+    }
+    return 0;
+}
+
+// armor audit: for each equipment slot, counts the assets that the equipment list cannot show and says why.
+if (args.Length >= 2 && args[0] == "armor" && args[1] == "audit")
+{
+    var auditIndex = Swtor.Assets.AssetIndex.Load(DefaultRoot());
+    foreach (string slot in new[] { "face", "chest", "hand", "leg", "boot", "waist", "bracer" })
+    {
+        var all = auditIndex.Appearances.AssetsOfSlot(slot).ToList();
+        var noBase = all.Where(a => a.BaseFile.Length == 0).ToList();
+        var naked = all.Where(a => a.BaseFile.Length > 0 && a.ArtName.Contains("_naked_", StringComparison.Ordinal)).ToList();
+        var rest = all.Except(noBase).Except(naked).ToList();
+        // An asset is reachable if some gender and body type selection shows it.
+        bool Reachable(Swtor.Formats.Xml.AppearanceAsset a) =>
+            a.Bodytypes.Count == 0
+                ? auditIndex.HasModel(a.BaseFile.Replace("[bt]", "", StringComparison.OrdinalIgnoreCase).Replace('\\', '/').TrimStart('/'))
+                : a.Bodytypes.Any(b => auditIndex.HasModel(a.BaseFile.Replace("[bt]", b, StringComparison.OrdinalIgnoreCase).Replace('\\', '/').TrimStart('/')));
+        var lost = rest.Where(a => !Reachable(a)).ToList();
+        Console.WriteLine($"{slot}: {all.Count} assets, {noBase.Count} without model file name, {naked.Count} naked, {lost.Count} model missing on disk, {rest.Count - lost.Count} listable");
+        foreach (var a in lost.Take(args.Length >= 3 ? int.Parse(args[2]) : 3)) Console.WriteLine($"    missing: {a.ArtName} -> {a.BaseFile} [{string.Join(',', a.Bodytypes)}]");
+        foreach (var a in noBase.Take(args.Length >= 3 ? int.Parse(args[2]) : 3)) Console.WriteLine($"    no base file: {a.ArtName} attachments {a.Attachments.Count}");
+
+        // Models on disk that no asset names.
+        string folder = Path.Combine(auditIndex.Root, "art", "dynamic", slot, "model");
+        if (Directory.Exists(folder))
+        {
+            var named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var a in all)
+                foreach (string file in a.Attachments.Prepend(a.BaseFile))
+                    foreach (string b in a.Bodytypes.Count == 0 ? [""] : a.Bodytypes)
+                        named.Add(Path.GetFileName(file.Replace("[bt]", b, StringComparison.OrdinalIgnoreCase).Replace('\\', '/')));
+            var orphans = Directory.EnumerateFiles(folder, "*.gr2").Select(Path.GetFileName).Where(n => !n!.EndsWith(".lod.gr2", StringComparison.OrdinalIgnoreCase) && !named.Contains(n!)).ToList();
+            Console.WriteLine($"    models on disk not named by index.xml: {orphans.Count}");
+            foreach (var o in orphans.Take(args.Length >= 3 ? int.Parse(args[2]) : 3)) Console.WriteLine($"      {o}");
+        }
+    }
+    return 0;
+}
 
 // palettes [filter]: lists the garment palettes with the color that they give to a mid-grey pixel.
 if (args.Length >= 1 && args[0] == "palettes")
@@ -1007,6 +1081,19 @@ static int GomCommand(string[] args)
         return 0;
     }
 
+    // gom id <number...>: names the objects with these ids (decimal or 0x hex).
+    if (args[1] == "id" && args.Length >= 3)
+    {
+        var idb = Swtor.Assets.GomDatabase.Open(DefaultRoot());
+        foreach (string text in args.Skip(2))
+        {
+            ulong id = text.StartsWith("0x") ? Convert.ToUInt64(text[2..], 16) : ulong.Parse(text);
+            var hit = idb.Entries.FirstOrDefault(e => e.Id == id);
+            Console.WriteLine($"{text} => {(hit is null ? "(none)" : hit.Name)}");
+        }
+        return 0;
+    }
+
     if (args.Length >= 3 && args[1] is "find" or "dump")
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -1100,7 +1187,7 @@ static int CharCommand(string[] args)
     }
     var first = spec.Options.First(o => o.Slot == Swtor.Assets.AppearanceSlot.Head);
     Console.WriteLine($"compatible with head option {first.Key}:");
-    foreach (var (slot, keys) in spec.Compatible[first.Key]) Console.WriteLine($"   {slot}: {string.Join(",", keys.Take(20))}{(keys.Count > 20 ? "..." : "")}");
+    foreach (var (slot, keys) in spec.Compatible[first.Key]) { Console.WriteLine($"   {slot}: {keys.Count} keys {string.Join(",", keys.Take(20))}{(keys.Count > 20 ? "..." : "")}"); if (slot == Swtor.Assets.AppearanceSlot.FaceHair && args.Length >= 5) foreach (var g in keys.Select(k => spec.Options.First(o => o.Key == k)).GroupBy(o => index.Appearances.FindAsset(o.AssetId)?.Asset.ArtName ?? "?")) Console.WriteLine($"      {g.Key} x{g.Count()}"); }
     return 0;
 }
 

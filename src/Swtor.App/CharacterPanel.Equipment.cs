@@ -34,7 +34,7 @@ public sealed partial class CharacterPanel
     // Slots that can hold equipment. "face" is the helmet (the head gear). The chest, hand, leg and boot slots show a bare body part when empty.
     private static readonly string[] EquipSlots = ["face", "chest", "hand", "leg", "boot", "waist", "bracer"];
     private static readonly string[] NakedSlots = ["chest", "hand", "leg", "boot"];
-    private const int MaxListed = 400;
+    private const int MaxListed = 5000; // More than any slot has (728 chests): the combo lists every asset.
 
     private readonly Dictionary<string, EquipChoice> _equipment = [];
     private readonly Dictionary<string, string> _equipFilter = [];
@@ -111,7 +111,7 @@ public sealed partial class CharacterPanel
     // (a trandoshan head gives a trandoshan body), otherwise the material of the naked asset.
     private ResolvedPart? NakedPart(string slot, char gender, string? bodytype, AppearanceAsset? head)
     {
-        if (!NakedSlots.Contains(slot) || _index!.Appearances.FindAsset(slot, NakedBody.AssetName(slot, _spec!.Race, head?.ArtName)) is not { } naked)
+        if (!NakedSlots.Contains(slot) || _index!.Appearances.FindAsset(slot, NakedBody.AssetName(slot, BodyRace(head), head?.ArtName)) is not { } naked)
             return null;
         if (head?.SkinMaterials is { } skins && skins.TryGetValue(slot, out string? material) && material.Length > 0
             && PartResolver.ResolveWithMaterial(_index, naked, material, gender, bodytype) is { DiffusePath: not null } own)

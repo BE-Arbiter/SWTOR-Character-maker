@@ -30,19 +30,25 @@ public sealed class GomDatabase
         foreach (var entry in entries) _byName.TryAdd(entry.Name, entry);
     }
 
-    /// <summary>Reads the headers of all buckets and prototypes under <paramref name="root"/>/systemgenerated.</summary>
-    public static GomDatabase Open(string root)
+    /// <summary>
+    /// Reads the headers of all buckets and prototypes under <paramref name="root"/>/systemgenerated.
+    /// <paramref name="progress"/> gets a value from 0 to 1. Most of the time goes to the buckets.
+    /// </summary>
+    public static GomDatabase Open(string root, IProgress<float>? progress = null)
     {
         string folder = Path.Combine(root, "systemgenerated");
         var schema = GomSchema.Parse(File.ReadAllBytes(Path.Combine(folder, "client.gom")));
 
         var buckets = Directory.GetFiles(Path.Combine(folder, "buckets"), "*.bkt");
         var perBucket = new List<GomEntry>[buckets.Length];
+        int bucketsDone = 0;
         Parallel.For(0, buckets.Length, i =>
         {
             int number = int.Parse(Path.GetFileNameWithoutExtension(buckets[i]));
             var bucket = GomBucketFile.Open(File.ReadAllBytes(buckets[i]));
             perBucket[i] = bucket.Nodes.Select(n => new GomEntry(n.Name, n.Id, n.ClassId, number, n, null)).ToList();
+            int done = Interlocked.Increment(ref bucketsDone);
+            if (done % 32 == 0 || done == buckets.Length) progress?.Report(0.95f * done / buckets.Length);
         });
 
         var entries = perBucket.SelectMany(list => list).ToList();
@@ -51,6 +57,7 @@ public sealed class GomDatabase
             var node = GomPrototypeFile.Parse(File.ReadAllBytes(file));
             entries.Add(new GomEntry(node.Name, node.Id, node.ClassId, -1, null, file));
         }
+        progress?.Report(1f);
         return new GomDatabase(folder, entries, schema);
     }
 

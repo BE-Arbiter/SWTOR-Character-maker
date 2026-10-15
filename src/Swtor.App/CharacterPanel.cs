@@ -85,7 +85,10 @@ public sealed partial class CharacterPanel
                 AddHead(part);
                 continue;
             }
-            AddModel(part.ModelPath, LoadTexture(part, TintFor(slot)), slot.ToString());
+            var texture = LoadTexture(part, TintFor(slot));
+            AddModel(part.ModelPath, texture, slot.ToString());
+            // Cyborg implants are attachments that share the material of the asset.
+            foreach (string attachment in part.Attachments) AddModel(attachment, texture, slot.ToString(), isAttachment: true);
         }
 
         var headAsset = HeadOption() is { } head ? _index.Appearances.FindAsset(head.AssetId)?.Asset : null;
@@ -207,6 +210,7 @@ public sealed partial class CharacterPanel
     }
 
     private CharacterOption? OptionFor(AppearanceSlot slot) =>
+        _npcOptions is not null && slot != AppearanceSlot.Head ? _npcOptions.GetValueOrDefault(slot) : // NPC mode: the look decides.
         _selected.TryGetValue(slot, out long key) ? _spec?.Options.FirstOrDefault(o => o.Key == key) : null;
 
     private void DrawListSlot(AppearanceSlot slot)

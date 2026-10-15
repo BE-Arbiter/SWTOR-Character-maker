@@ -40,7 +40,9 @@ public static class PartResolver
     /// </summary>
     public static ResolvedPart? ResolveAsset(AssetIndex index, AppearanceAsset asset, string? materialId, char gender, string? preferredBodytype = null)
     {
-        if (asset.BaseFile.Length == 0) return null;
+        // Some assets (cyborg implants) have no base file: their parts are all attachments, and the first one that exists is the main model.
+        bool attachmentsOnly = asset.BaseFile.Length == 0;
+        if (attachmentsOnly && asset.Attachments.Count == 0) return null;
 
         IEnumerable<string> bodytypes = asset.Bodytypes.OrderBy(b =>
             b.Equals(preferredBodytype, StringComparison.OrdinalIgnoreCase) ? 0
@@ -48,8 +50,10 @@ public static class PartResolver
         string? model = null, matchedBodytype = null;
         foreach (var bodytype in asset.Bodytypes.Count == 0 ? [""] : bodytypes)
         {
-            string candidate = Expand(asset.BaseFile, bodytype);
-            if (!index.HasModel(candidate)) continue;
+            string? candidate = attachmentsOnly
+                ? asset.Attachments.Select(a => Expand(a, bodytype)).FirstOrDefault(index.HasModel)
+                : Expand(asset.BaseFile, bodytype);
+            if (candidate is null || !index.HasModel(candidate)) continue;
             model = candidate;
             matchedBodytype = bodytype.Length > 0 ? bodytype : null;
             break;
@@ -57,7 +61,7 @@ public static class PartResolver
         if (model is null) return null;
 
         char? matchedGender = matchedBodytype is { Length: >= 2 } ? char.ToLowerInvariant(matchedBodytype[1]) : null;
-        var attachments = asset.Attachments.Select(a => Expand(a, matchedBodytype ?? "")).Where(index.HasModel).ToList();
+        var attachments = asset.Attachments.Select(a => Expand(a, matchedBodytype ?? "")).Where(a => index.HasModel(a) && !a.Equals(model, StringComparison.OrdinalIgnoreCase)).ToList();
 
         var material = asset.Materials.FirstOrDefault(m => m.Id == materialId) ?? asset.Materials.FirstOrDefault();
         ResolvedMaterial main = material is null ? new(null, null) : Textures(index, material, matchedGender ?? gender, matchedBodytype);
@@ -80,8 +84,11 @@ public static class PartResolver
     /// <summary>Cheap check: true if a model file exists for the asset with a suitable body type (no material is read).</summary>
     public static bool HasModel(AssetIndex index, AppearanceAsset asset, char gender, string? preferredBodytype)
     {
-        if (asset.Bodytypes.Count == 0) return index.HasModel(Expand(asset.BaseFile, ""));
-        return asset.Bodytypes.Any(b => index.HasModel(Expand(asset.BaseFile, b))
+        bool Exists(string bodytype) => asset.BaseFile.Length > 0
+            ? index.HasModel(Expand(asset.BaseFile, bodytype))
+            : asset.Attachments.Any(a => index.HasModel(Expand(a, bodytype)));
+        if (asset.Bodytypes.Count == 0) return Exists("");
+        return asset.Bodytypes.Any(b => Exists(b)
             && (preferredBodytype is null || b.Equals(preferredBodytype, StringComparison.OrdinalIgnoreCase) || (b.Length >= 2 && char.ToLowerInvariant(b[1]) == gender)));
     }
 

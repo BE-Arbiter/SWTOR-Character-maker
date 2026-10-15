@@ -58,6 +58,10 @@ public sealed partial class ViewerGame
         _readyItems = ItemCatalog.Load(database, Swtor.Formats.Stb.StringTable.Parse(File.ReadAllBytes(path)));
     }
 
+    // Reads the NPC looks and names. Runs on the background thread that opens the game database.
+    private static NpcCatalog LoadNpcs(GomDatabase database, string root) =>
+        NpcCatalog.Load(database, TextTables.Find(root, "npc.stb") is { } path ? Swtor.Formats.Stb.StringTable.Parse(File.ReadAllBytes(path)) : null);
+
     private bool SaveCharacter(string path)
     {
         try
