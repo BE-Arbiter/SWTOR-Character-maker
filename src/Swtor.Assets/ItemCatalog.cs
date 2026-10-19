@@ -12,7 +12,8 @@ namespace Swtor.Assets;
 /// </summary>
 public sealed record ItemInfo(
     string Key, string Name, int Level, int Quality, string QualityName,
-    AppearanceSlot Slot, long AssetId, long MaterialId, string? AppearanceName = null)
+    AppearanceSlot Slot, long AssetId, long MaterialId, string? AppearanceName = null,
+    long PrimaryPalette = 0, long SecondaryPalette = 0)
 {
     /// <summary>Path of the icon below the asset root, with "/" separators, or null when the item has no appearance object. The file may not exist.</summary>
     public string? IconPath => AppearanceName is null ? null : $"gfx/icons/{AppearanceName}.dds";
@@ -33,6 +34,8 @@ public sealed class ItemCatalog
     private const ulong SlotField = 0x4000000316C18126;          // appearance: enum slot
     private const ulong AssetField = 0x4000000316C18127;         // appearance: asset id
     private const ulong MaterialField = 0x4000000316C18128;      // appearance: material id
+    private const ulong PrimaryPaletteField = 0x4000000316C1812A;  // appearance: garment palette id of the first color (0 or missing: use the scheme)
+    private const ulong SecondaryPaletteField = 0x4000000316C1812B; // appearance: garment palette id of the second color
 
     private readonly Dictionary<long, List<ItemInfo>> _byAsset;
 
@@ -70,11 +73,12 @@ public sealed class ItemCatalog
     public static ItemCatalog Load(GomDatabase database, StringTable names)
     {
         // First the appearance objects, then the items that refer to them by name.
-        var appearances = new ConcurrentDictionary<string, (int Slot, long Asset, long Material)>(StringComparer.Ordinal);
+        var appearances = new ConcurrentDictionary<string, (int Slot, long Asset, long Material, long Primary, long Secondary)>(StringComparer.Ordinal);
         database.ForEachNode(e => e.Name.StartsWith("ipp.", StringComparison.Ordinal), (entry, node) =>
         {
             if (node.Object.Find(SlotField)?.Value is GomEnumValue slot && node.Object.Find(AssetField)?.Value is long asset)
-                appearances[entry.Name] = (slot.Value, asset, node.Object.Find(MaterialField)?.Value as long? ?? 0);
+                appearances[entry.Name] = (slot.Value, asset, node.Object.Find(MaterialField)?.Value as long? ?? 0,
+                    node.Object.Find(PrimaryPaletteField)?.Value as long? ?? 0, node.Object.Find(SecondaryPaletteField)?.Value as long? ?? 0);
         });
 
         database.Schema.Fields.TryGetValue(QualityField, out var qualityField);
@@ -92,7 +96,7 @@ public sealed class ItemCatalog
             int level = o.Find(LevelField)?.Value is long l ? (int)l : 0;
             if (appearances.TryGetValue(appearanceName, out var appearance))
                 items.Add(new ItemInfo(entry.Name, name, level, quality, qualityName,
-                    (AppearanceSlot)appearance.Slot, appearance.Asset, appearance.Material, appearanceName));
+                    (AppearanceSlot)appearance.Slot, appearance.Asset, appearance.Material, appearanceName, appearance.Primary, appearance.Secondary));
             else
                 // Not an "ipp.*" object: the string is a key of the weapon table.
                 weaponItems.Add((appearanceName, new ItemInfo(entry.Name, name, level, quality, qualityName, 0, 0, 0)));

@@ -150,7 +150,7 @@ public sealed partial class CharacterPanel
     {
         if (_startupEquipment is null || _index is null) return;
         foreach (var (slot, name) in _startupEquipment)
-            if (_index.Appearances.FindAsset(slot, name) is { } asset) _equipment[slot] = new EquipChoice(asset);
+            if (_index.Appearances.FindAsset(slot, name) is { } asset) _equipment[slot] = ChoiceFor(MakeEntry(asset), "");
         _startupEquipment = null;
     }
 

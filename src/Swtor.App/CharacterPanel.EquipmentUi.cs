@@ -516,6 +516,7 @@ public sealed partial class CharacterPanel
     // Equips an entry with the material variant of an item. An asset is shared by many items with different looks
     // (the "Veste de soldat imperial" is a variant of an asset that is first named after another item).
     // The item is the first one that matches the name filter, otherwise the first item of the asset.
+    // The colors of the item come from its appearance object (palettes of the item), which can differ from the color scheme of the material.
     // The first item of the entry whose name matches the filter and that is not the item named in the main label. Null if none.
     private static ItemInfo? VariantMatch(EquipEntry entry, string filter) =>
         filter.Length == 0 || entry.Items.Count == 0 ? null
@@ -525,7 +526,12 @@ public sealed partial class CharacterPanel
     {
         var item = VariantMatch(entry, filter) ?? (entry.Items.Count > 0 ? entry.Items[0] : null);
         int variant = item is null ? 0 : entry.Asset.Materials.ToList().FindIndex(m => m.Id == item.MaterialId.ToString(CultureInfo.InvariantCulture));
-        return new EquipChoice(entry.Asset) { Variant = Math.Max(0, variant) };
+        return new EquipChoice(entry.Asset)
+        {
+            Variant = Math.Max(0, variant),
+            PrimaryId = item?.PrimaryPalette > 0 ? item.PrimaryPalette.ToString(CultureInfo.InvariantCulture) : null,
+            SecondaryId = item?.SecondaryPalette > 0 ? item.SecondaryPalette.ToString(CultureInfo.InvariantCulture) : null,
+        };
     }
 
     private EquipEntry MakeEntry(AppearanceAsset asset)
