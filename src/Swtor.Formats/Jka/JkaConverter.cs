@@ -56,6 +56,14 @@ public static class JkaConverter
     // Surfaces below this size are never reduced (eyes, caps, tags).
     private const int MinVerticesToReduce = 150;
 
+    // Vertices that the model gets besides the drafts: the tag surfaces of the template (one triangle each) and the empty main surfaces.
+    // The budget is for the whole file, so the drafts get what is left (about 150 are used, this keeps a margin).
+    private const int TemplateVertices = 200;
+
+    // The head costs this many times more per collapse than the rest, so it only gives up vertices that nobody sees.
+    private const float HeadCostScale = 4f;
+
+
     private static readonly string[] FallbackBones =
     [
         "pelvis", "lower_lumbar", "upper_lumbar", "thoracic", "cervical", "cranium", "lclavical", "rclavical", "lhumerus", "rhumerus",
@@ -80,7 +88,11 @@ public static class JkaConverter
         foreach (var piece in pieces) drafts.AddRange(ConvertPiece(piece, meshes[piece.Mesh], jka));
 
         var surfaces = drafts.Select(d => d.Surface).ToArray();
-        ReduceSurfaces(surfaces, i => drafts[i].Region == JkaRegion.Head, maxTotalVertices);
+        // Over budget: find what nobody sees (the body under an armor). It is not removed, that would leave holes: it is reduced to
+        // the vertices of its border. The head is not tested (the eyes lie inside it).
+        bool[][]? hidden = maxTotalVertices > 0 && surfaces.Sum(s => s.Vertices.Length) > maxTotalVertices - TemplateVertices
+            ? HiddenGeometry.Find(surfaces, i => drafts[i].Region != JkaRegion.Head) : null;
+        ReduceSurfaces(surfaces, _ => false, i => drafts[i].Region == JkaRegion.Head ? HeadCostScale : 1f, maxTotalVertices > 0 ? maxTotalVertices - TemplateVertices : 0, hidden);
         for (int i = 0; i < drafts.Count; i++) drafts[i] = drafts[i] with { Surface = surfaces[i] };
         return drafts;
     }
@@ -341,37 +353,72 @@ public static class JkaConverter
     {
         var lod = model.Lods[0];
         int before = lod.Sum(s => s.Vertices.Length);
-        ReduceSurfaces(lod, i => (model.Surfaces[i].Flags & GlmSurfaceInfo.FlagBolt) != 0 || model.Surfaces[i].Name.StartsWith("head", StringComparison.OrdinalIgnoreCase), maxTotalVertices);
+        ReduceSurfaces(lod, i => (model.Surfaces[i].Flags & GlmSurfaceInfo.FlagBolt) != 0, i => model.Surfaces[i].Name.StartsWith("head", StringComparison.OrdinalIgnoreCase) ? HeadCostScale : 1f, maxTotalVertices);
         return (before, lod.Sum(s => s.Vertices.Length));
     }
 
     /// <summary>
     /// Simplifies the surfaces until their vertices fit the budget. Every surface of <see cref="MinVerticesToReduce"/> vertices or more
-    /// is reduced by the same ratio. A surface that cannot reach its share (boundaries stay) leaves more to the others, so the
-    /// pass repeats a few times.
+    /// is reduced with the same error threshold (scaled by <paramref name="costScale"/>), chosen so that the total fits.
     /// </summary>
-    private static void ReduceSurfaces(GlmSurface[] surfaces, Func<int, bool> isProtected, int maxTotalVertices)
+    private static void ReduceSurfaces(GlmSurface[] surfaces, Func<int, bool> isProtected, Func<int, float> costScale, int maxTotalVertices, bool[][]? hidden = null)
     {
         if (maxTotalVertices <= 0) return;
-        for (int pass = 0; pass < 8; pass++)
+        int total = surfaces.Sum(s => s.Vertices.Length);
+        if (total <= maxTotalVertices) return;
+        bool Reducible(int i) => !isProtected(i) && surfaces[i].Vertices.Length >= MinVerticesToReduce;
+        var reducible = Enumerable.Range(0, surfaces.Length).Where(Reducible).ToArray();
+        if (reducible.Length == 0) return;
+
+        // One error threshold for all surfaces: the cheapest collapses go first, wherever they are. A flat part loses many
+        // vertices, a curved part (a shoulder pad) loses few. The same ratio for every surface made curved pads fall in.
+        var positions = new Vector3[surfaces.Length][];
+        var errors = new List<float>();
+        foreach (int i in reducible)
         {
-            int total = surfaces.Sum(s => s.Vertices.Length);
-            if (total <= maxTotalVertices) return;
-            bool Reducible(int i) => !isProtected(i) && surfaces[i].Vertices.Length >= MinVerticesToReduce;
-            int big = Enumerable.Range(0, surfaces.Length).Where(Reducible).Sum(i => surfaces[i].Vertices.Length);
-            if (big == 0) return;
-            double keep = Math.Clamp((double)(maxTotalVertices - (total - big)) / big, 0.1, 0.95);
-            for (int i = 0; i < surfaces.Length; i++)
-            {
-                if (!Reducible(i)) continue;
-                var surface = surfaces[i];
-                var (triangles, source) = MeshSimplifier.Simplify(surface.Vertices.Select(v => v.Position).ToArray(), surface.Triangles,
-                    (int)(surface.Vertices.Length * keep), surface.Vertices.Select(v => v.Uv).ToArray(), MaxTrianglesPerVertex);
-                surfaces[i] = new GlmSurface { Vertices = source.Select(v => surface.Vertices[v]).ToArray(), Triangles = [.. triangles] };
-            }
-            if (surfaces.Sum(s => s.Vertices.Length) >= total) return;
+            positions[i] = surfaces[i].Vertices.Select(v => v.Position).ToArray();
+            var own = new List<float>();
+            MeshSimplifier.Simplify(positions[i], surfaces[i].Triangles, 0, MaxTrianglesPerVertex, errorLog: own, hiddenTriangles: hidden?[i]);
+            errors.AddRange(own.Select(e => e * costScale(i)));
         }
+        errors.Sort();
+        if (errors.Count == 0) return;
+        var original = (GlmSurface[])surfaces.Clone();
+
+        // Applies a threshold to every surface and returns the new vertex count.
+        int Apply(float threshold)
+        {
+            foreach (int i in reducible)
+            {
+                var surface = original[i];
+                var (triangles, source, moved) = MeshSimplifier.Simplify(positions[i], surface.Triangles, 0, MaxTrianglesPerVertex, threshold / costScale(i), hiddenTriangles: hidden?[i]);
+                var vertices = new GlmVertex[source.Count];
+                for (int k = 0; k < vertices.Length; k++)
+                {
+                    var old = surface.Vertices[source[k]];
+                    // A vertex that moved onto a neighbor keeps its own UV and weights.
+                    vertices[k] = old.Position == moved[k] ? old : new GlmVertex { Position = moved[k], Normal = old.Normal, Uv = old.Uv, Weights = old.Weights };
+                }
+                surfaces[i] = new GlmSurface { Vertices = vertices, Triangles = [.. triangles] };
+            }
+            return surfaces.Sum(s => s.Vertices.Length);
+        }
+
+        // The game does not accept more vertices than the budget, so the budget is a hard limit and the threshold is the smallest
+        // one that fits (bisection: the vertex count falls when the threshold grows). The order of collapses is not exactly sorted by
+        // error, so the guess from the log can fall short.
+        float high = errors[^1] * 1.001f, low = 0;
+        float guess = errors[Math.Min(total - maxTotalVertices, errors.Count) - 1];
+        if (Apply(guess) <= maxTotalVertices) high = guess; else low = guess;
+        if (low > 0 && Apply(high) > maxTotalVertices) return; // Not reachable: keep the most reduced version.
+        for (int step = 0; step < 14; step++)
+        {
+            float mid = (low + high) / 2;
+            if (Apply(mid) <= maxTotalVertices) high = mid; else low = mid;
+        }
+        Apply(high);
     }
+
 
     /// <summary>Regions that the pieces of a slot can fill. A piece never makes surfaces outside of them.</summary>
     public static JkaRegion[] AllowedRegions(string slot) => slot switch

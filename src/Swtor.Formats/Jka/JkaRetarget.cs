@@ -63,7 +63,9 @@ public sealed class JkaRetarget
         Scale = scale ?? JkaOrigin("cervical").Z / SwtorWorld("Neck").Y;
         _jkaDepth = jka.Bones[jka.IndexOf("pelvis")].Origin.Y;
 
-        string[] spineBones = ["Root", "LowerBack", "Chest", "Chest1", "Chest2", "Neck", "Neck1", "Head"];
+        // The curve ends at the neck joint. Above it the offset is constant, so the head moves as one rigid piece:
+        // with Neck1 and Head in the list, the chin and the nose (which lie at different heights) were shifted by different amounts.
+        string[] spineBones = ["Root", "LowerBack", "Chest", "Chest1", "Chest2", "Neck"];
         _spine = spineBones.Select(b => { var p = Convert(SwtorWorld(b)); return (Height: p.Z, Depth: p.Y); }).OrderBy(x => x.Height).ToArray();
 
         foreach (char side in "lr")
